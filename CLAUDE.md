@@ -42,12 +42,16 @@ See `benchmark/README.md` for full documentation.
 - **Weight = time delta, not sample count**: Each sample's weight is `clock_now - clock_prev` in nanoseconds. This corrects for safepoint delays.
 - **Postponed jobs for sampling**: Timer thread calls `rb_postponed_job_trigger()`. Actual sampling happens at the next VM safepoint via `sprof_sample_job()`.
 - **Per-thread state via `rb_internal_thread_specific_key`**: Stores `prev_cpu_ns` per thread. First sample for each thread is skipped (no delta yet).
-- **No protobuf dependency**: pprof format is encoded with a hand-written encoder in `lib/sprof.rb` (`Sprof::PProf.encode`).
+- **Deferred string resolution**: Sampling stores raw frame VALUEs in a pool. String resolution (`rb_profile_frame_full_label`, `rb_profile_frame_path`) happens at stop time, not during sampling. This keeps the hot path allocation-free.
+- **No protobuf dependency**: pprof format is encoded with a hand-written encoder in `lib/sprof.rb` (`Sprof::PProf.encode`). String table is built in Ruby at encode time.
 - **Two clock modes**: cpu (per-thread `clock_gettime` via Linux TID-based clockid) and wall (`CLOCK_MONOTONIC`).
+- **Method-level profiling**: No line numbers. Frame labels use `rb_profile_frame_full_label` for qualified names (e.g., `Integer#times`).
 
 ## Coding Notes
 
 - The C extension uses a single global `sprof_profiler_t`. Only one profiling session at a time.
-- String interning (`sprof_string_table_t`) deduplicates path/label strings for pprof output.
-- Thread exit cleanup is handled by `RUBY_INTERNAL_THREAD_EVENT_EXITED` hook.
+- Frame pool (`VALUE *frame_pool`, initial ~1MB) stores raw frame VALUEs from `rb_profile_thread_frames`. A TypedData wrapper with `dmark` using `rb_gc_mark_locations` keeps them alive across GC.
+- `rb_profile_thread_frames` writes directly into the frame pool (no intermediate buffer).
+- Sample buffer and frame pool both grow by 2x on demand via `realloc`.
+- Thread exit cleanup is handled by `RUBY_INTERNAL_THREAD_EVENT_EXITED` hook. Stop cleans up all live threads' thread-specific data.
 - Benchmark workload methods (rw/cw/csleep/cwait) are numbered 1-1000 to appear as distinct functions in profiler output.
