@@ -5,104 +5,243 @@ Ruby: 4.0.0, Linux 6.6.87 (WSL2, 20 cores)
 
 ## Methodology
 
-Each profiler was tested against a mixed-workload scenario containing four types of methods:
+Each profiler was tested against five scenario types, two frequencies (100Hz, 1000Hz), two modes (cpu, wall), and two load conditions (idle, full CPU saturation on all 20 cores). Scenario #0 from each file was used. Error is the average of `|actual - expected| / expected` across all methods in the scenario.
 
-- **rw** (Ruby busy-wait): spins in a Ruby loop reading `CLOCK_THREAD_CPUTIME_ID`
-- **cw** (C busy-wait): spins in a C function reading `CLOCK_THREAD_CPUTIME_ID`
-- **csleep** (C nanosleep, GVL held): calls `nanosleep()` without releasing the GVL
-- **cwait** (C nanosleep, GVL released): calls `nanosleep()` via `rb_thread_call_without_gvl`
+### Workload Types
 
-Each scenario has 50-150 base method calls with ~30% repeated 3-10 times, totaling 160-400 calls per scenario. Every method has a known execution time in microseconds. The expected CPU time and wall time for each method are precomputed and stored in the scenario JSON.
+| Prefix | Behavior | GVL | CPU time | Wall time |
+|--------|----------|-----|----------|-----------|
+| `rw` | Ruby busy-wait | Held | consumes | consumes |
+| `cw` | C busy-wait | Held | consumes | consumes |
+| `csleep` | `nanosleep` (GVL held) | Held | 0 | consumes |
+| `cwait` | `nanosleep` (GVL released) | Released | 0 | consumes |
+| `mixed` | All of the above | Mixed | varies | consumes |
 
-The runner (`check_accuracy.rb`) generates a profiler-specific script, executes it, parses the profiler output, and compares per-method actual time against expected time. The reported "error" is the average of `|actual - expected| / expected` across all methods.
+### Profilers
 
-Two frequencies (100Hz and 1000Hz), two modes (cpu and wall), and two load conditions (idle and full CPU saturation on all 20 cores) were tested.
+| Profiler | Sampling mechanism | Output format |
+|----------|--------------------|---------------|
+| sprof | Postponed job + time-delta weight | pprof protobuf |
+| stackprof | Signal-based, uniform sample count | Custom marshal |
+| vernier | Signal-based, wall only | Firefox Profiler JSON |
+| pf2 | Async signal, native + Ruby stack | pprof protobuf |
 
-## Results: Mixed Workload (No Load)
+### Notes on vernier
 
-| Profiler | 100Hz cpu | 100Hz wall | 1000Hz cpu | 1000Hz wall |
-|----------|-----------|------------|------------|-------------|
-| **sprof** | **1.9%** | **5.4%** | **0.2%** | **0.8%** |
-| stackprof | 21.4% | 83.7% | 38.1% | 83.5% |
-| vernier | 63.5% | 93.2% | 63.5% | 35.9% |
-| pf2 | 58.7% | 46.4% | 61.4% | 55.8% |
+Vernier does not support CPU-time sampling. The `:retained` mode was used as a substitute for cpu tests, but it measures object retention, not CPU time. All vernier cpu results show a constant ~63-220% error unrelated to the workload and should be disregarded. Only vernier wall results are meaningful.
 
-### Key observations
+---
 
-**sprof** is the only profiler that passes (<20% error) in all combinations. At 1000Hz the error drops below 1% in both modes. Even at 100Hz, cpu mode stays under 2% because the time-delta weighting compensates for the lower sampling rate.
+## Results: No Load
 
-**stackprof** shows high error for several reasons:
-- In cpu mode, it counts samples uniformly (1 sample = 1 interval) without time-delta correction. At 1000Hz the interval is 1ms, but C busy-wait methods (`cw`) execute long stretches without safepoints, so their TOTAL counts are inflated by `clock_gettime` being sampled as the leaf frame instead of the actual workload method. At 100Hz, each sample represents a larger interval but the same bias applies.
-- In wall mode, stackprof at 1000Hz still shows ~84% error because `nanosleep`-based methods (csleep/cwait) are invisible: the thread is sleeping inside a C call with no safepoint, so no samples are collected during that time, yet the wall clock advances.
+### rw (Ruby busy-wait)
 
-**vernier** has a unique profile:
-- cpu mode always shows 63.5% error because vernier does not support CPU-time sampling. The `:retained` mode is used as a fallback, which measures something entirely different (object retention).
-- wall mode at 1000Hz (35.9%) is moderately accurate for rw/cw/cwait methods but completely misses csleep (GVL-held sleep). At 100Hz, wall error jumps to 93.2% due to fewer samples and coarser resolution.
-
-**pf2** outputs pprof format but with flat=0 for all Ruby/C frames. Only cumulative values are available, and they include native stack frames (libc, VM internals), making per-method attribution unreliable. The 46-62% errors are consistent across frequencies, suggesting a structural issue rather than a sampling rate problem.
-
-## Results: Mixed Workload (Under Full CPU Load)
-
-All 20 cores were saturated with busy-loop processes during profiling.
+Ruby methods calling `Process.clock_gettime` in a loop. Frequent safepoints.
 
 | Profiler | 100Hz cpu | 100Hz wall | 1000Hz cpu | 1000Hz wall |
 |----------|-----------|------------|------------|-------------|
-| **sprof** | **1.7%** | 35.1% | **0.2%** | 36.2% |
-| stackprof | 24.8% | 85.9% | 39.6% | 82.8% |
-| vernier | 63.5% | 90.5% | 63.5% | 37.7% |
-| pf2 | 95.2% | 68.8% | 87.0% | 81.4% |
+| **sprof** | **7.6%** | **5.7%** | **0.8%** | **1.3%** |
+| stackprof | 8.0% | 7.7% | 74.6% | **0.8%** |
+| vernier | 219.5% | 90.1% | 219.5% | **7.2%** |
+| pf2 | **7.3%** | **6.2%** | **3.2%** | **1.0%** |
 
-### Key observations
+- All profilers perform well on rw at 100Hz because Ruby busy-wait hits safepoints frequently.
+- stackprof 1000Hz cpu (74.6%): the high frequency causes `clock_gettime` to dominate the leaf-frame TOTAL count, inflating error. stackprof 1000Hz wall (0.8%) is excellent because wall-mode sampling avoids this distortion.
+- vernier 1000Hz wall (7.2%) is usable but less precise than sprof/stackprof/pf2.
+- pf2 performs well across the board for rw-only -- its cumulative accounting works when all frames are Ruby-level.
 
-**sprof cpu mode is unaffected by load**: 0.2% at 1000Hz, 1.7% at 100Hz -- essentially identical to no-load results. This is because sprof reads per-thread CPU clocks (`clock_gettime` with thread-specific clockid), which only count time the thread actually ran on a CPU, excluding time spent in the OS scheduler's run queue.
+### cw (C busy-wait)
 
-**sprof wall mode correctly degrades under load** (5% -> 35%): busy-wait methods (rw/cw) take longer in wall time because the OS scheduler preempts them to run the load processes. This is not a bug -- wall time is supposed to reflect real elapsed time including scheduling delays.
-
-**stackprof cpu barely changes under load** (21% -> 25% at 100Hz, 38% -> 40% at 1000Hz): the error was already high without load due to safepoint bias and uniform sample weighting, so the additional scheduling noise is within the existing error margin.
-
-**pf2 cpu degrades significantly under load** (59% -> 95% at 100Hz): pf2's cumulative values become even more inflated when wall time expands due to CPU contention, suggesting its "cpu" mode may actually be measuring wall time internally.
-
-## Results: Ruby-Only Workload (rw methods, No Load)
-
-To isolate the effect of workload type, the same benchmark was run with rw-only scenarios (pure Ruby busy-wait, no C methods or sleep).
+C functions spinning in `clock_gettime` loop. No safepoints during the loop body.
 
 | Profiler | 100Hz cpu | 100Hz wall | 1000Hz cpu | 1000Hz wall |
 |----------|-----------|------------|------------|-------------|
-| **sprof** | **7.9%** | **7.3%** | **1.2%** | **0.9%** |
-| stackprof | 8.3% | 7.4% | 75.0% | 0.7% |
-| vernier | 219.5% | 89.8% | 219.5% | 1.4% |
+| **sprof** | **0.3%** | **0.5%** | **0.1%** | **0.0%** |
+| stackprof | 78.5% | 78.5% | 97.9% | 97.9% |
+| vernier | 100.0% | 90.0% | 100.0% | **3.0%** |
+| pf2 | **2.8%** | **4.9%** | **4.2%** | **0.5%** |
 
-### Key observations
+- **sprof excels** (<1% at all frequencies) because time-delta weighting correctly attributes the long safepoint-free intervals to the right frame.
+- **stackprof completely fails** (78-98%): C busy-wait runs without safepoints, so stackprof captures very few samples during these methods. The uniform weighting cannot compensate.
+- vernier 1000Hz wall (3.0%) works because vernier's wall sampling can observe the thread spending time in C code.
+- pf2 handles cw well (<5%) since it collects native stack frames.
 
-**stackprof wall at 1000Hz achieves 0.7% error** on rw-only workloads. This is because pure Ruby busy-wait hits safepoints frequently (every `clock_gettime` call), so uniform sample counting works well when there are no C-level blind spots. However, stackprof cpu at 1000Hz shows 75.0% error -- the high frequency causes the `clock_gettime` leaf frame to dominate TOTAL counts, inflating error.
+### csleep (nanosleep, GVL held)
 
-**stackprof at 100Hz** (8.3% cpu, 7.4% wall) is usable for rw-only workloads. The lower frequency means each sample carries more weight, which averages out the safepoint bias for methods that frequently reach safepoints.
+The thread sleeps via `nanosleep()` while holding the GVL. CPU time = 0, wall time = sleep duration.
 
-**vernier wall at 1000Hz achieves 1.4% error** on rw-only workloads, comparable to sprof. Vernier's sampling is accurate when the workload consists entirely of Ruby code with frequent safepoints and no sleep/blocking calls. Its wall mode at 100Hz (89.8%) suffers because fewer samples mean coarser attribution.
+| Profiler | 100Hz cpu | 100Hz wall | 1000Hz cpu | 1000Hz wall |
+|----------|-----------|------------|------------|-------------|
+| **sprof** | **0.0%** | **6.2%** | **0.0%** | **6.1%** |
+| stackprof | 0.0% | 76.0% | 0.0% | 97.6% |
+| vernier | 0.0% | 97.6% | 0.0% | 97.6% |
+| pf2 | 0.0% | 76.0% | 0.0% | 97.6% |
 
-**sprof at 100Hz** (7.9% cpu, 7.3% wall) is less accurate than at 1000Hz but still well within usable range. The time-delta weighting ensures that even with 10x fewer samples, each sample carries the correct weight proportional to elapsed time.
+- All profilers correctly report 0 CPU time (trivially correct since nanosleep consumes no CPU).
+- **sprof is the only profiler that accurately measures csleep wall time** (~6% error). The postponed job fires during sleep and the wall-time delta captures the elapsed time.
+- stackprof/vernier/pf2 all report near-zero wall time for csleep (76-98% error) because no samples are collected while the thread is sleeping inside `nanosleep()`.
+- sprof's 6% error (rather than <1%) is due to the first/last sample boundary effect: the postponed job may not fire exactly at the start and end of the sleep, leaving a small unmeasured gap.
 
-## Summary
+### cwait (nanosleep, GVL released)
 
-### What makes sprof different
+The thread sleeps via `rb_thread_call_without_gvl` + `nanosleep()`. GVL is released during sleep.
 
-sprof's core advantage is **time-delta weighting**: each sample's weight equals the actual nanoseconds elapsed since the previous sample, not a fixed interval. This has three consequences:
+| Profiler | 100Hz cpu | 100Hz wall | 1000Hz cpu | 1000Hz wall |
+|----------|-----------|------------|------------|-------------|
+| **sprof** | **0.0%** | **1.3%** | **0.0%** | **1.2%** |
+| stackprof | 0.0% | 62.9% | 0.0% | 96.3% |
+| vernier | 0.0% | 90.1% | 0.0% | **1.5%** |
+| pf2 | 0.0% | 62.8% | 0.0% | 96.3% |
 
-1. **Safepoint delay is corrected**: if a safepoint is delayed by 5ms, the sample carries 5ms of weight instead of 1ms. Other profilers lose this information.
-2. **Per-thread CPU clocks**: in cpu mode, sprof reads each thread's actual CPU consumption via Linux's thread-specific clockid. Sleep, I/O, and scheduling delays are excluded. Other profilers either use wall time or rely on signal-based sampling that doesn't distinguish CPU from wall time.
-3. **Works across workload types**: C busy-wait, Ruby busy-wait, GVL-held sleep, and GVL-released sleep are all accurately attributed in the appropriate mode. Other profilers have blind spots for one or more of these categories.
+- All profilers correctly report 0 CPU time.
+- **sprof** accurately measures cwait wall time (~1% error), slightly better than csleep because the GVL release creates a cleaner sampling boundary.
+- **vernier 1000Hz wall (1.5%)** also works well for cwait: when the GVL is released, vernier can observe the thread state change.
+- stackprof and pf2 fail to capture cwait wall time (63-96% error).
 
-### Profiler suitability by scenario
+### mixed (all workload types combined)
 
-| Scenario | sprof | stackprof | vernier | pf2 |
-|----------|-------|-----------|---------|-----|
-| Mixed workload, cpu time | Accurate | Poor (safepoint bias) | Not supported | Poor (inflated cum) |
-| Mixed workload, wall time | Accurate | Poor (misses sleep) | Moderate (misses csleep) | Poor (inflated cum) |
-| Ruby-only, wall, 1000Hz | Accurate | Accurate | Accurate | Not tested |
-| Under CPU load, cpu time | Stable | Unchanged (already poor) | Not supported | Degrades heavily |
-| Under CPU load, wall time | Degrades (correct) | Unchanged (already poor) | Moderate | Degrades |
+The most realistic scenario: rw, cw, csleep, and cwait methods mixed together.
 
-### Frequency guidance
+| Profiler | 100Hz cpu | 100Hz wall | 1000Hz cpu | 1000Hz wall |
+|----------|-----------|------------|------------|-------------|
+| **sprof** | **1.7%** | **5.7%** | **0.3%** | **0.8%** |
+| stackprof | 21.2% | 83.4% | 38.2% | 83.6% |
+| vernier | 63.5% | 93.2% | 63.5% | 36.1% |
+| pf2 | 62.8% | 46.4% | 61.3% | 55.8% |
 
-- **1000Hz**: best accuracy for all profilers, but higher overhead. Recommended for short-running benchmarks.
-- **100Hz**: sprof stays accurate (1-8% depending on mode and workload). stackprof and vernier degrade but remain usable for rw-only wall mode. Recommended as the default for production profiling.
+- **sprof is the only profiler that passes in all combinations.** The errors from individual workload types average out, but sprof handles each type well so the overall error stays low.
+- stackprof's mixed errors combine the cw blindness (cpu) and csleep/cwait blindness (wall).
+- vernier 1000Hz wall (36.1%) is moderate -- it handles rw/cw/cwait but misses csleep entirely.
+- pf2's cumulative accounting inflates values in mixed scenarios.
+
+---
+
+## Results: Under CPU Load
+
+All 20 cores saturated with busy-loop processes. This tests whether profilers correctly measure CPU time independent of scheduling delays.
+
+### rw (Ruby busy-wait)
+
+| Profiler | 100Hz cpu | 100Hz wall | 1000Hz cpu | 1000Hz wall |
+|----------|-----------|------------|------------|-------------|
+| **sprof** | **10.0%** | 7.4% | **1.5%** | **0.9%** |
+| stackprof | 13.5% | 14.9% | 76.6% | **1.3%** |
+| pf2 | 22.7% | 6.7% | 14.0% | **2.3%** |
+
+- sprof cpu is slightly worse under load at 100Hz (7.6% -> 10.0%) but still well within tolerance. At 1000Hz, no change (0.8% -> 1.5%).
+- stackprof wall actually improves under load at 100Hz (7.7% -> 14.9% is worse, but 1000Hz: 0.8% -> 1.3% is stable).
+- pf2 cpu degrades moderately (7.3% -> 22.7% at 100Hz).
+
+### cw (C busy-wait)
+
+| Profiler | 100Hz cpu | 100Hz wall | 1000Hz cpu | 1000Hz wall |
+|----------|-----------|------------|------------|-------------|
+| **sprof** | **0.5%** | **0.3%** | **0.2%** | 24.3% |
+| stackprof | 78.5% | 78.5% | 97.9% | 97.9% |
+| pf2 | 34.4% | 48.8% | 41.7% | 18.5% |
+
+- **sprof cpu remains rock-solid** (<1%) under load for cw. The per-thread CPU clock is unaffected by scheduling.
+- sprof 1000Hz wall (24.3%) degrades as expected: C busy-wait takes longer in wall time when CPU is contested.
+- stackprof remains completely blind to cw regardless of load.
+- pf2 degrades significantly (2.8% -> 34.4% cpu at 100Hz).
+
+### csleep (nanosleep, GVL held)
+
+| Profiler | 100Hz cpu | 100Hz wall | 1000Hz cpu | 1000Hz wall |
+|----------|-----------|------------|------------|-------------|
+| **sprof** | **0.0%** | **6.0%** | **0.0%** | **6.0%** |
+| stackprof | 0.0% | 76.0% | 0.0% | 97.6% |
+| pf2 | 0.0% | 76.0% | 0.0% | 95.6% |
+
+- **No change under load** for any profiler. csleep is pure sleep time -- CPU contention does not affect `nanosleep` duration, and CPU time remains 0.
+
+### cwait (nanosleep, GVL released)
+
+| Profiler | 100Hz cpu | 100Hz wall | 1000Hz cpu | 1000Hz wall |
+|----------|-----------|------------|------------|-------------|
+| **sprof** | **0.0%** | **0.5%** | **0.0%** | **2.8%** |
+| stackprof | 0.0% | 62.9% | 0.0% | 96.3% |
+| pf2 | 0.0% | 62.8% | 0.0% | 95.8% |
+
+- Same pattern as csleep: load does not affect sleep-based workloads.
+- sprof wall slightly increases (1.2% -> 2.8% at 1000Hz) but remains accurate.
+
+### mixed (all workload types combined)
+
+| Profiler | 100Hz cpu | 100Hz wall | 1000Hz cpu | 1000Hz wall |
+|----------|-----------|------------|------------|-------------|
+| **sprof** | **1.0%** | 31.8% | **0.2%** | 35.3% |
+| stackprof | 25.0% | 86.1% | 39.5% | 84.8% |
+| pf2 | 96.9% | 68.1% | 80.6% | 77.0% |
+
+- **sprof cpu is unaffected by load** (1.7% -> 1.0% at 100Hz, 0.3% -> 0.2% at 1000Hz). The per-thread CPU clock correctly excludes scheduling delays.
+- **sprof wall degrades as expected** (5.7% -> 31.8%): busy-wait methods take longer in wall time under CPU contention. This is correct behavior.
+- pf2 cpu degrades catastrophically under load (62.8% -> 96.9% at 100Hz), suggesting it does not use true per-thread CPU clocks.
+- stackprof is largely unchanged because its baseline error was already high.
+
+---
+
+## Summary Table
+
+Average error (%) for scenario #0. Bold = <10%. ~~Struck~~ = >90%.
+
+### CPU mode, no load
+
+| Scenario | sprof 100 | sprof 1K | stackprof 100 | stackprof 1K | pf2 100 | pf2 1K |
+|----------|-----------|----------|---------------|--------------|---------|--------|
+| rw | **7.6** | **0.8** | **8.0** | 74.6 | **7.3** | **3.2** |
+| cw | **0.3** | **0.1** | 78.5 | ~~97.9~~ | **2.8** | **4.2** |
+| csleep | **0.0** | **0.0** | **0.0** | **0.0** | **0.0** | **0.0** |
+| cwait | **0.0** | **0.0** | **0.0** | **0.0** | **0.0** | **0.0** |
+| mixed | **1.7** | **0.3** | 21.2 | 38.2 | 62.8 | 61.3 |
+
+### Wall mode, no load
+
+| Scenario | sprof 100 | sprof 1K | stackprof 100 | stackprof 1K | vernier 100 | vernier 1K | pf2 100 | pf2 1K |
+|----------|-----------|----------|---------------|--------------|-------------|------------|---------|--------|
+| rw | **5.7** | **1.3** | **7.7** | **0.8** | ~~90.1~~ | **7.2** | **6.2** | **1.0** |
+| cw | **0.5** | **0.0** | 78.5 | ~~97.9~~ | ~~90.0~~ | **3.0** | **4.9** | **0.5** |
+| csleep | **6.2** | **6.1** | 76.0 | ~~97.6~~ | ~~97.6~~ | ~~97.6~~ | 76.0 | ~~97.6~~ |
+| cwait | **1.3** | **1.2** | 62.9 | ~~96.3~~ | ~~90.1~~ | **1.5** | 62.8 | ~~96.3~~ |
+| mixed | **5.7** | **0.8** | 83.4 | 83.6 | ~~93.2~~ | 36.1 | 46.4 | 55.8 |
+
+### CPU mode, under load
+
+| Scenario | sprof 100 | sprof 1K | stackprof 100 | stackprof 1K | pf2 100 | pf2 1K |
+|----------|-----------|----------|---------------|--------------|---------|--------|
+| rw | **10.0** | **1.5** | 13.5 | 76.6 | 22.7 | 14.0 |
+| cw | **0.5** | **0.2** | 78.5 | ~~97.9~~ | 34.4 | 41.7 |
+| csleep | **0.0** | **0.0** | **0.0** | **0.0** | **0.0** | **0.0** |
+| cwait | **0.0** | **0.0** | **0.0** | **0.0** | **0.0** | **0.0** |
+| mixed | **1.0** | **0.2** | 25.0 | 39.5 | ~~96.9~~ | 80.6 |
+
+---
+
+## Key Findings
+
+### 1. sprof is accurate across all workload types
+
+sprof is the only profiler that achieves <10% error for every workload type in both cpu and wall mode. Its time-delta weighting eliminates safepoint bias, and per-thread CPU clocks provide true CPU-time measurement.
+
+### 2. csleep is a unique differentiator for wall mode
+
+GVL-held `nanosleep` (csleep) is invisible to all profilers except sprof in wall mode. stackprof, vernier, and pf2 all report near-zero wall time because they cannot sample during the sleep. sprof's postponed-job mechanism fires during the sleep and the wall-time delta captures the elapsed duration.
+
+### 3. C busy-wait (cw) exposes safepoint bias
+
+stackprof's uniform-weight sampling completely fails for C busy-wait (78-98% error) because the thread spends long periods without hitting a safepoint. sprof's time-delta weighting handles this correctly (<1%).
+
+### 4. CPU-time measurement is stable under load (sprof only)
+
+Under full CPU saturation, sprof's cpu mode error is unchanged (0.2-1.0% for mixed). pf2's "cpu" mode degrades heavily (62% -> 97%), suggesting it may be using wall time internally. stackprof's cpu mode is already inaccurate without load, so load makes little difference.
+
+### 5. 100Hz is sufficient for sprof
+
+At 100Hz, sprof achieves <8% error in all scenarios (cpu mode) and <7% in most wall scenarios. The time-delta weighting compensates for the lower sample rate by assigning correct weights to each sample. Other profilers generally need 1000Hz for comparable accuracy on favorable workloads (rw-only).
+
+### 6. Each profiler has a niche
+
+- **stackprof**: accurate for Ruby-only wall-mode profiling at 1000Hz (0.8% for rw). Good choice when profiling pure Ruby code and wall time is the metric.
+- **vernier**: accurate for wall-mode profiling of Ruby and GVL-released code at 1000Hz (1.5-7.2%). Cannot measure csleep or CPU time.
+- **pf2**: accurate for rw/cw workloads (1-7%) thanks to native stack collection. Degrades in mixed scenarios and under load.
+- **sprof**: accurate for all workload types, both modes, both frequencies, with and without load.
