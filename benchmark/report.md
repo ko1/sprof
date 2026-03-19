@@ -254,35 +254,37 @@ The previous tests measure whether profilers correctly attribute **absolute time
 
 ### Setup
 
-10 randomly selected `rw` methods are called with argument 0 (immediate return), totaling 100,000 calls distributed in random proportions. Each individual call takes only ~0.5us, so the total runtime is ~50ms. The expected result is the ratio of calls per method. The profiler output values are converted to ratios and compared against the expected ratios.
+10 randomly selected `rw` methods are called with argument 0 (immediate return), totaling 4,000,000 calls distributed in random proportions. Each individual call takes ~0.5us, so the total runtime is ~2 seconds. The expected result is the ratio of calls per method. The profiler output values are converted to ratios and compared against the expected ratios.
 
-This scenario tests the statistical sampling accuracy: with very short methods, the profiler cannot rely on time deltas -- it must capture enough samples to reconstruct the call distribution.
+This scenario tests statistical sampling accuracy: since all methods consume the same negligible time per call, the accumulated time per method should be proportional to its call count.
 
 ### Results (scenario #0, no load)
 
-| Profiler | cpu 1kHz | cpu 10kHz | wall 1kHz | wall 10kHz |
-|----------|----------|-----------|-----------|------------|
-| sprof | 52.7% | 21.9% | 43.0% | 25.1% |
-| stackprof | 88.5% | 132.0% | 52.9% | **18.5%** |
-| vernier | 86.6% | 86.6% | 45.5% | **6.5%** |
-| pf2 | 86.5% | 96.5% | 43.1% | 48.7% |
+| Profiler | cpu 100Hz | cpu 1kHz | wall 100Hz | wall 1kHz |
+|----------|-----------|----------|------------|-----------|
+| sprof | 26.6% | **15.3%** | 24.6% | **11.4%** |
+| stackprof | **11.1%** | 17.8% | 24.1% | **2.7%** |
+| vernier | 86.8% | 95.0% | 23.6% | **7.6%** |
+| pf2 | **14.1%** | **9.4%** | 32.1% | **10.0%** |
 
 ### Analysis
 
-The core issue for all profilers is **sample count**. The total runtime is only ~50ms, so at 1kHz there are ~50 samples to distribute across 10 methods. At 10kHz there are ~500 samples, which is enough for reasonable statistical accuracy. The results confirm this: all profilers improve with higher frequency.
+With ~2 seconds of runtime, all profilers have enough samples for meaningful results. At 1kHz there are ~2000 samples across 10 methods, giving ~200 samples per method on average.
 
-**vernier wall 10kHz achieves the best ratio accuracy (6.5%).** At 10kHz it collects ~500 samples across the 50ms runtime -- enough for the sample distribution to converge to the true call-frequency ratio.
+**stackprof wall 1kHz is the most accurate (2.7%).** With ~2000 uniformly-weighted samples, the sample distribution closely matches the true call-frequency ratio.
 
-**stackprof wall 10kHz is also strong (18.5%).** Same principle -- sufficient samples yield good accuracy.
+**vernier wall 1kHz is also strong (7.6%).** Same principle -- uniform sample counting converges well with sufficient samples.
 
-**stackprof cpu gets worse at higher frequency (88% -> 132%).** At 10kHz, stackprof's cpu-mode signal fires so frequently that `Process.clock_gettime` (called inside each `rw` method) dominates the leaf samples, distorting the method-level TOTAL counts.
+**sprof wall 1kHz achieves 11.4%**, a practical level of accuracy. sprof's time-delta weighting assigns each sample a weight proportional to elapsed time. Since all calls take the same tiny amount of time, the accumulated weight per method is proportional to call count -- in theory. In practice, profiler overhead and scheduling jitter add noise to the per-sample time deltas, which doesn't average out as cleanly as uniform counting (where each sample contributes exactly 1).
 
-**sprof improves but remains moderate (53% -> 22% cpu, 43% -> 25% wall).** sprof's time-delta weighting should converge to the correct ratios given enough samples, since the total accumulated time for each method is proportional to its call count (all calls take the same time). However, at 10kHz the per-sample time delta is very small (~0.1ms), and profiler overhead and scheduling jitter add noise to these tiny deltas. This noise doesn't cancel out as cleanly as uniform counting where each sample contributes exactly 1.
+**pf2 cpu 1kHz achieves 9.4%.** pf2's cumulative accounting works reasonably well for this pure-Ruby workload.
 
-**pf2 does not improve at 10kHz (87% -> 97% cpu, 43% -> 49% wall).** The native stack inclusion and cumulative-only accounting continue to distort method-level attribution regardless of frequency.
+**stackprof cpu 1kHz (17.8%) is worse than at 100Hz (11.1%).** At higher frequency, `Process.clock_gettime` (called inside each `rw` method) dominates the leaf samples in cpu mode, distorting the method-level TOTAL counts.
+
+**vernier cpu shows very high error (87-95%).** Vernier does not support cpu-time sampling; the `:retained` mode used as a substitute measures something entirely different.
 
 ### Interpretation
 
-This scenario is challenging for all profilers because the total runtime (~50ms) is very short relative to the sampling interval. The accuracy is fundamentally limited by sample count, not by the profiling mechanism.
+The accuracy in ratio tests is fundamentally limited by **sample count**. With ~2 seconds of runtime, 1kHz sampling provides enough samples for all profilers to achieve usable accuracy (<20% for most). The remaining gap between sprof (11.4%) and stackprof (2.7%) in wall mode is due to noise in sprof's time deltas -- not a fundamental limitation of time-delta weighting, but a practical one where the per-sample time delta is tiny (~1ms) and profiler overhead adds proportionally significant jitter.
 
-For sprof specifically, the remaining gap versus uniform-counting profilers at 10kHz (25% vs 6.5%) is due to noise in the time deltas. With sufficiently high frequency or longer total runtime, sprof's ratios should converge as well -- the accumulated time per method is proportional to call count when per-call time is uniform. This is not a fundamental limitation of time-delta weighting, but a practical one in low-sample-count regimes where the delta noise is significant relative to the signal.
+For real-world profiling, the ratio scenario is an edge case: methods that consume negligible individual time but are called millions of times. In such cases, the total accumulated time is still small. The time-accuracy tests (where sprof achieves <1% error) are more representative of typical profiling workloads where the goal is to find methods that consume significant time.

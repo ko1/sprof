@@ -45,7 +45,7 @@ output_path = File.join(__dir__, output_file)
 srand(seed)
 
 RATIO_NUM_METHODS = 10
-RATIO_TOTAL_CALLS = 100_000
+RATIO_TOTAL_CALLS = 4_000_000
 
 scenarios = num_scenarios.times.map do |i|
   if prefix_type == "ratio"
