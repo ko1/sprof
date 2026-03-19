@@ -1,0 +1,49 @@
+#!/usr/bin/env ruby
+require "optparse"
+
+output = "sprof.data"
+frequency = 1000
+
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: sprof [options] [exec] command [args...]"
+
+  opts.on("-o", "--output PATH", "Output file (default: sprof.data)") do |v|
+    output = v
+  end
+
+  opts.on("-f", "--frequency HZ", Integer, "Sampling frequency in Hz (default: 1000)") do |v|
+    frequency = v
+  end
+
+  opts.on("-h", "--help", "Show this help") do
+    puts opts
+    exit
+  end
+end
+
+begin
+  parser.order!(ARGV)
+rescue OptionParser::InvalidOption => e
+  $stderr.puts e.message
+  $stderr.puts parser
+  exit 1
+end
+
+# Skip "exec" subcommand if present
+ARGV.shift if ARGV.first == "exec"
+
+if ARGV.empty?
+  $stderr.puts "No command specified."
+  $stderr.puts parser
+  exit 1
+end
+
+# Add lib dir to RUBYLIB so -rsprof can find the extension
+lib_dir = File.expand_path("../lib", __dir__)
+ENV["RUBYLIB"] = [lib_dir, ENV["RUBYLIB"]].compact.join(File::PATH_SEPARATOR)
+ENV["RUBYOPT"] = "-rsprof #{ENV['RUBYOPT']}".strip
+ENV["SPROF_ENABLED"] = "1"
+ENV["SPROF_OUTPUT"] = output
+ENV["SPROF_FREQUENCY"] = frequency.to_s
+
+exec(*ARGV)
