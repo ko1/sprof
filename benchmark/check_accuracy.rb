@@ -15,18 +15,20 @@
 #   ruby check_accuracy.rb -P stackprof              # use stackprof profiler
 #   ruby check_accuracy.rb -P vernier                # use vernier profiler
 #   ruby check_accuracy.rb -P pf2                    # use pf2 profiler
+#   ruby check_accuracy.rb -F 100                    # set sampling frequency to 100Hz
 
 require "json"
 require "open3"
 require "etc"
 
-FREQUENCY = 1000
+DEFAULT_FREQUENCY = 1000
 
 # Parse options
 scenario_file = File.join(__dir__, "scenarios_mixed.json")
 tolerance = 0.20
 profiling_mode = :cpu
 profiler = "sprof"
+frequency = DEFAULT_FREQUENCY
 args = ARGV.dup
 if (idx = args.index("-f"))
   args.delete_at(idx)
@@ -43,6 +45,10 @@ end
 if (idx = args.index("-P"))
   args.delete_at(idx)
   profiler = args.delete_at(idx)
+end
+if (idx = args.index("-F"))
+  args.delete_at(idx)
+  frequency = args.delete_at(idx).to_i
 end
 cpu_load = !!args.delete("-l")
 
@@ -82,10 +88,13 @@ selected =
     ids.map { |i| scenarios[i] || (abort "Scenario ##{i} not found") }
   end
 
+$current_frequency = frequency
+
 puts "=== Sprof Accuracy Check ==="
 puts "File: #{File.basename(scenario_file)}"
 puts "Profiler: #{profiler}"
 puts "Mode: #{profiling_mode}"
+puts "Frequency: #{frequency}Hz"
 puts "Load: #{cpu_load ? "ON (#{Etc.nprocessors} cores)" : "off"}"
 puts "Running #{selected.size} scenario(s) out of #{scenarios.size}"
 puts
@@ -100,41 +109,41 @@ end
 
 # --- Profiler-specific script generation ---
 
-def generate_script_sprof(calls, output_path, profiling_mode)
+def generate_script_sprof(calls, output_path, profiling_mode, freq)
   script = <<~RUBY
     $LOAD_PATH.unshift(File.join(__dir__, "..", "lib"))
     $LOAD_PATH.unshift(File.join(__dir__, "lib"))
     require "sprof"
     require "sprof_workload_methods"
-    Sprof.start(frequency: #{FREQUENCY}, mode: :#{profiling_mode})
+    Sprof.start(frequency: #{freq}, mode: :#{profiling_mode})
   RUBY
   calls.each { |name, usec| script << "SprofWorkload.#{name}(#{usec})\n" }
   script << "Sprof.save(#{output_path.inspect})\n"
   script
 end
 
-def generate_script_stackprof(calls, output_path, profiling_mode)
+def generate_script_stackprof(calls, output_path, profiling_mode, freq)
   mode = profiling_mode == :wall ? :wall : :cpu
+  interval_us = 1_000_000 / freq
   script = <<~RUBY
     $LOAD_PATH.unshift(File.join(__dir__, "lib"))
     require "stackprof"
     require "sprof_workload_methods"
-    StackProf.run(mode: :#{mode}, interval: #{FREQUENCY}, raw: true, out: #{output_path.inspect}) do
+    StackProf.run(mode: :#{mode}, interval: #{interval_us}, raw: true, out: #{output_path.inspect}) do
   RUBY
   calls.each { |name, usec| script << "  SprofWorkload.#{name}(#{usec})\n" }
   script << "end\n"
   script
 end
 
-def generate_script_vernier(calls, output_path, profiling_mode)
+def generate_script_vernier(calls, output_path, profiling_mode, freq)
   mode = profiling_mode == :wall ? :wall : :retained
-  # Vernier supports :wall and :retained (no direct cpu mode); use wall for both
-  # since cpu-time sampling is not supported in vernier
+  interval_us = 1_000_000 / freq
   script = <<~RUBY
     $LOAD_PATH.unshift(File.join(__dir__, "lib"))
     require "vernier"
     require "sprof_workload_methods"
-    result = Vernier.trace(mode: :#{mode}, interval: #{FREQUENCY}) do
+    result = Vernier.trace(mode: :#{mode}, interval: #{interval_us}) do
   RUBY
   calls.each { |name, usec| script << "  SprofWorkload.#{name}(#{usec})\n" }
   script << <<~RUBY
@@ -144,13 +153,14 @@ def generate_script_vernier(calls, output_path, profiling_mode)
   script
 end
 
-def generate_script_pf2(calls, output_path, profiling_mode)
+def generate_script_pf2(calls, output_path, profiling_mode, freq)
   time_mode = profiling_mode == :wall ? :wall : :cpu
+  interval_ms = [1, 1000 / freq].max
   script = <<~RUBY
     $LOAD_PATH.unshift(File.join(__dir__, "lib"))
     require "pf2"
     require "sprof_workload_methods"
-    Pf2.profile(out: #{output_path.inspect}, format: :pprof, time_mode: :#{time_mode}) do
+    Pf2.profile(out: #{output_path.inspect}, format: :pprof, time_mode: :#{time_mode}, interval_ms: #{interval_ms}) do
   RUBY
   calls.each { |name, usec| script << "  SprofWorkload.#{name}(#{usec})\n" }
   script << "end\n"
@@ -192,7 +202,7 @@ def parse_results_stackprof(output_path, _method_re)
   # TOTAL = cumulative sample count for the frame (what we want).
   # interval is in microseconds (cpu) or microseconds (wall).
   # Extract interval from the header: Mode: cpu(1000)
-  interval_us = FREQUENCY
+  interval_us = 1_000_000 / $current_frequency
   if raw_out =~ /Mode:\s+\w+\((\d+)\)/
     interval_us = $1.to_i
   end
@@ -276,10 +286,10 @@ selected.each do |scenario|
 
   # Generate test script
   script = case profiler
-           when "sprof"    then generate_script_sprof(calls, output_path, profiling_mode)
-           when "stackprof" then generate_script_stackprof(calls, output_path, profiling_mode)
-           when "vernier"  then generate_script_vernier(calls, output_path, profiling_mode)
-           when "pf2"      then generate_script_pf2(calls, output_path, profiling_mode)
+           when "sprof"    then generate_script_sprof(calls, output_path, profiling_mode, frequency)
+           when "stackprof" then generate_script_stackprof(calls, output_path, profiling_mode, frequency)
+           when "vernier"  then generate_script_vernier(calls, output_path, profiling_mode, frequency)
+           when "pf2"      then generate_script_pf2(calls, output_path, profiling_mode, frequency)
            else abort "Unknown profiler: #{profiler}"
            end
 
