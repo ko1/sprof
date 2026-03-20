@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/logo.svg" alt="sperf logo" width="260">
+</p>
+
 # sperf
 
 A safepoint-based sampling performance profiler for Ruby. Uses actual time deltas as sample weights to correct safepoint bias.

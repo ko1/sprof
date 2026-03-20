@@ -1,0 +1,7 @@
+<svg viewBox="0 0 260 155" xmlns="http://www.w3.org/2000/svg">
+  <text x="130" y="105" text-anchor="middle" font-family="'Poiret One', sans-serif" font-size="130" fill="#aa2820">§</text>
+  <line x1="35" y1="118" x2="100" y2="118" stroke="#cc342d" stroke-width="0.8"/>
+  <polygon points="130,114 134,118 130,122 126,118" fill="#cc342d" opacity="0.7"/>
+  <line x1="160" y1="118" x2="225" y2="118" stroke="#cc342d" stroke-width="0.8"/>
+  <text x="130" y="143" text-anchor="middle" font-family="'Poiret One', sans-serif" font-size="28" fill="#aa2820" letter-spacing="10">perf</text>
+</svg>
