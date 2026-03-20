@@ -108,12 +108,12 @@ class TestSperf < Test::Unit::TestCase
   # --- Boundary / realloc tests ---
 
   # Sample buffer initial capacity is 1024.
-  # With 4 threads at 1000Hz, ~4000 samples/sec → crosses boundary in <1s.
+  # With 4 threads at 5000Hz, ~20000 samples/sec → crosses boundary quickly.
   def test_sample_buffer_realloc
-    Sperf.start(frequency: 1000)
+    Sperf.start(frequency: 5000)
 
     threads = 4.times.map do
-      Thread.new { 10_000_000.times { 1 + 1 } }
+      Thread.new { 50_000_000.times { 1 + 1 } }
     end
     threads.each(&:join)
 
@@ -132,11 +132,11 @@ class TestSperf < Test::Unit::TestCase
   # Frame pool initial capacity is ~131K frames (1MB / 8 bytes per VALUE).
   # Use deep recursion + many threads to generate lots of frames quickly.
   def test_frame_pool_realloc
-    Sperf.start(frequency: 1000)
+    Sperf.start(frequency: 5000)
 
     threads = 8.times.map do
       Thread.new do
-        deep_recurse(100) { 20_000_000.times { 1 + 1 } }
+        deep_recurse(100) { 50_000_000.times { 1 + 1 } }
       end
     end
     threads.each(&:join)
