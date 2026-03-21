@@ -23,7 +23,6 @@ sperf report --text profile.pb.gz
 # Or use go tool pprof directly
 go tool pprof -http=:8080 profile.pb.gz
 go tool pprof -top profile.pb.gz
-go tool pprof -flame profile.pb.gz
 ```
 
 You can also import pprof files into [speedscope](https://www.speedscope.app/) via its web interface.
@@ -57,8 +56,9 @@ bottom_frame;...;top_frame weight_ns
 sperf record -o profile.collapsed ruby my_app.rb
 flamegraph.pl profile.collapsed > flamegraph.svg
 
-# Open in speedscope (drag-and-drop the file)
-open https://www.speedscope.app/
+# Open in speedscope (drag-and-drop the .collapsed file)
+# macOS: open https://www.speedscope.app/
+# Linux: xdg-open https://www.speedscope.app/
 ```
 
 **Advantages**: Simple text format, easy to process with command-line tools. Compatible with Brendan Gregg's [FlameGraph](#cite:gregg2016) tools and speedscope.

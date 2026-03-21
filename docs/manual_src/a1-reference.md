@@ -64,6 +64,8 @@ These are used internally by the CLI to configure the auto-started profiler:
 | `SPERF_MODE` | `cpu`, `wall` | Profiling mode |
 | `SPERF_FORMAT` | `pprof`, `collapsed`, `text` | Output format |
 | `SPERF_VERBOSE` | `1` | Print statistics to stderr |
+| `SPERF_STAT` | `1` | Enable stat mode output |
+| `SPERF_STAT_COMMAND` | string | Command string shown in stat output header |
 
 ## Profiling mode comparison
 

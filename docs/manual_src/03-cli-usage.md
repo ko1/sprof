@@ -248,7 +248,7 @@ sperf report profile.pb.gz
 # Print top functions
 sperf report --top
 
-# Print text report
+# Print pprof text summary
 sperf report --text
 ```
 
@@ -275,7 +275,7 @@ The default behavior (without `--top` or `--text`) opens an interactive web UI i
 | Option | Description |
 |--------|-------------|
 | `--top` | Print top functions by flat time |
-| `--text` | Print text report |
+| `--text` | Print pprof text summary |
 | (default) | Open interactive web UI in browser |
 
 ## sperf diff

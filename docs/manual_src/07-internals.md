@@ -91,7 +91,7 @@ When the postponed job fires, `sperf_sample_job` runs on whatever thread current
 This is a deliberate design choice:
 
 1. `rb_profile_frames` can only capture the current thread's stack
-2. There's no need to iterate `Thread.list` — combined with GVL event hooks, sperf gets complete coverage of all threads
+2. There's no need to iterate `Thread.list` — combined with GVL event hooks, sperf gets broad coverage of all threads (though a [known race](#known-limitations) in the Ruby VM can cause occasional missed samples)
 
 The sampling callback:
 

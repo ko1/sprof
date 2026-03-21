@@ -50,7 +50,7 @@ sperf supports POSIX systems:
 | Linux | `nanosleep` thread (with `signal: false`) | Fallback, ~100us drift/tick |
 | macOS | `nanosleep` thread | Signal-based timer not available |
 
-On Linux, sperf uses `timer_create` with `SIGEV_SIGNAL` and a `sigaction` handler by default. This provides precise interval timing with no extra thread. The signal number defaults to `SIGRTMIN+8` and can be changed via the `signal:` option.
+On Linux, sperf uses `timer_create` with `SIGEV_SIGNAL` and a `sigaction` handler by default. This provides precise interval timing with no extra thread. The signal number defaults to `SIGRTMIN+8` and can be changed via the `signal:` keyword argument to `Sperf.start` in the Ruby API.
 
 On macOS (and when `signal: false` is set on Linux), sperf falls back to a dedicated pthread with a `nanosleep` loop.
 
