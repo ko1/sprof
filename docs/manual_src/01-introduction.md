@@ -8,6 +8,22 @@ Unlike traditional sampling profilers that count samples uniformly, sperf uses a
 
 sperf is inspired by Linux [perf](#cite:demelo2010), providing a familiar CLI interface with subcommands like `record`, `stat`, and `report`.
 
+### Advantages
+
+- **Accurate profiling**: Time-delta weighting corrects [safepoint bias](#index:safepoint bias), producing results closer to real time distribution than traditional count-based profilers.
+- **GVL / GC visibility**: In wall mode, tracks off-GVL blocking, GVL contention, and GC marking/sweeping as distinct frames — no separate tool needed.
+- **Standard output formats**: Outputs [pprof](#index:pprof) protobuf (compatible with `go tool pprof`), [collapsed stacks](#index:collapsed stacks) (for flame graphs / speedscope), and human-readable text.
+- **Low overhead**: Default 1000 Hz sampling adds < 0.2% overhead, suitable for production.
+- **Simple CLI**: `sperf stat` for a quick overview, `sperf record` + `sperf report` for detailed analysis.
+
+### Limitations
+
+- **Ruby 3.4+ only**: Requires APIs introduced in Ruby 3.4.
+- **POSIX only**: Linux and macOS. Windows is not supported.
+- **Method-level granularity**: No line-number resolution — profiles show method names only.
+- **Single session**: Only one profiling session can be active at a time (global state in the C extension).
+- **Safepoint latency**: Samples are still deferred to safepoints. The time-delta weighting corrects the *bias* but cannot recover the exact interrupted instruction pointer.
+
 ## Why another profiler?
 
 Ruby already has profiling tools like [stackprof](#cite:stackprof). So why sperf?
