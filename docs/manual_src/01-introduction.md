@@ -14,9 +14,11 @@ Ruby already has profiling tools like [stackprof](#cite:stackprof). So why sperf
 
 ### The safepoint bias problem
 
-All Ruby sampling profilers must collect backtraces at safepoints — points where the VM is in a consistent state. When a timer fires between safepoints, the actual sample is delayed until the next safepoint. Traditional profilers count each sample equally (weight = 1), which means a sample that was delayed by a long-running C method gets the same weight as one taken immediately.
+Most Ruby sampling profilers collect backtraces by calling `rb_profile_frames` directly in the signal handler. This approach yields backtraces at the actual signal timing, but relies on undocumented internal VM state — `rb_profile_frames` is not guaranteed to be async-signal-safe, and the results can be unreliable if the VM is in the middle of updating its internal structures.
 
-This is the [safepoint bias](#cite:mytkowicz2010) problem: functions that happen to be running when the thread reaches a safepoint appear more often than they should, while functions between safepoints are under-represented.
+sperf takes a different approach: it uses the postponed job mechanism (`rb_postponed_job`), which is the Ruby VM's official API for safely deferring work from signal handlers. Backtrace collection is deferred to the next [safepoint](#index) — a point where the VM is in a consistent state and `rb_profile_frames` can return reliable results. The trade-off is that when a timer fires between safepoints, the actual sample is delayed until the next safepoint.
+
+If each sample were counted equally (weight = 1), a sample delayed by a long-running C method would get the same weight as one taken immediately. This is the [safepoint bias](#cite:mytkowicz2010) problem: functions that happen to be running when the thread reaches a safepoint appear more often than they should, while functions between safepoints are under-represented.
 
 ```mermaid
 sequenceDiagram
