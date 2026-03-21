@@ -113,6 +113,10 @@ sperf hooks GVL and GC events to attribute non-CPU time:
 | `[GC marking]` | Time in GC mark phase |
 | `[GC sweeping]` | Time in GC sweep phase |
 
+## Limitations
+
+- **Method-level granularity only**: sperf profiles at the method level, not the line level. If a method is slow, you will see which method it is, but not which line within it. This is a deliberate trade-off for lower overhead and simpler implementation.
+
 ## Output Formats
 
 | Format | Extension | Use case |
