@@ -79,14 +79,17 @@ Ruby's sampling profilers collect stack traces at **safepoints**, not at the exa
 sperf uses **time deltas as sample weights**:
 
 ```
-Timer thread (pthread)           VM thread (postponed job)
-─────────────────────           ────────────────────────
+Timer (signal or thread)         VM thread (postponed job)
+────────────────────────         ────────────────────────
   every 1/frequency sec:          at next safepoint:
     rb_postponed_job_trigger()  →   sperf_sample_job()
                                       time_now = read_clock()
                                       weight = time_now - prev_time
                                       record(backtrace, weight)
 ```
+
+On Linux, the timer uses `timer_create` + signal delivery (no extra thread).
+On other platforms, a dedicated pthread with `nanosleep` is used.
 
 If a safepoint is delayed, the sample carries proportionally more weight. The total weight equals the total time, accurately distributed across call stacks.
 
