@@ -112,9 +112,9 @@ class TestRperf < Test::Unit::TestCase
   def test_sample_buffer_realloc
     Rperf.start(frequency: 5000)
 
-    # Single thread: timer sampling fires reliably (~5000/sec) without
-    # GVL contention, crossing the initial capacity of 1024 in ~0.3s.
-    15_000_000.times { 1 + 1 }
+    # At 5000Hz, 1 second gives ~5000 samples, well over the initial
+    # capacity of 1024. Time-based loop avoids machine-speed sensitivity.
+    busy_wait(1.0)
 
     data = Rperf.stop
     assert_not_nil data
@@ -129,13 +129,13 @@ class TestRperf < Test::Unit::TestCase
   end
 
   # Frame pool initial capacity is ~131K frames (1MB / 8 bytes per VALUE).
-  # Use deep recursion + many threads to generate lots of frames quickly.
+  # Use deep recursion to generate lots of frames quickly.
   def test_frame_pool_realloc
     Rperf.start(frequency: 5000)
 
-    # Single thread with deep recursion: each sample captures ~300 frames.
-    # ~440+ samples × 300 depth > 131072 (initial 1MB pool).
-    deep_recurse(300) { 5_000_000.times { 1 + 1 } }
+    # Each sample captures ~300 frames. At 5000Hz, 0.5s gives ~1500 samples
+    # × 300 depth = ~450K frames, well over 131072. Use 1s for margin.
+    deep_recurse(300) { busy_wait(1.0) }
 
     data = Rperf.stop
     assert_not_nil data
@@ -580,6 +580,13 @@ class TestRperf < Test::Unit::TestCase
     (n / chunk).times do
       chunk.times { 1 + 1 }
       sleep(0)
+    end
+  end
+
+  def busy_wait(seconds)
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
+    while Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
+      1000.times { 1 + 1 }
     end
   end
 
