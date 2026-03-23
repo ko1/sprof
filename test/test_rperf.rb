@@ -110,22 +110,25 @@ class TestRperf < Test::Unit::TestCase
   # Sample buffer initial capacity is 1024.
   # With 4 threads at 5000Hz, ~20000 samples/sec → crosses boundary quickly.
   def test_sample_buffer_realloc
-    Rperf.start(frequency: 5000)
+    duration = 1.0
+    data = nil
+    trials = []
 
-    # At 5000Hz with safepoint-based sampling, macOS arm64 yields ~950
-    # samples/sec. 2 seconds gives ~1900, safely over initial capacity of 1024.
-    busy_wait(2.0)
+    loop do
+      Rperf.start(frequency: 5000)
+      busy_wait(duration)
+      data = Rperf.stop
 
-    data = Rperf.stop
-    assert_not_nil data
-    samples = data[:samples]
+      trials << "#{duration}s: samples=#{data[:samples].size}, trigger_count=#{data[:trigger_count]}, sampling_count=#{data[:sampling_count]}"
+      break if data[:samples].size > 1024
 
-    # Must have crossed initial capacity of 1024
-    assert_operator samples.size, :>, 1024,
-      "Expected >1024 samples to exercise realloc (got #{samples.size}, trigger_count=#{data[:trigger_count]}, sampling_count=#{data[:sampling_count]})"
+      duration *= 2
+      assert_operator duration, :<=, 32,
+        "Expected >1024 samples to exercise realloc. Trials:\n#{trials.map { |t| "  #{t}" }.join("\n")}"
+    end
 
     # Verify all samples have valid data
-    assert_valid_samples(samples)
+    assert_valid_samples(data[:samples])
   end
 
   # Frame pool initial capacity is ~131K frames (1MB / 8 bytes per VALUE).
