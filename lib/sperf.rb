@@ -1,7 +1,15 @@
-require "sperf.so"
 require "sperf/version"
 require "zlib"
 require "stringio"
+
+begin
+  # gem install
+  require "sperf.so"
+rescue LoadError
+  # local development
+  require 'rbconfig'
+  require_relative "../tmp/#{RbConfig::CONFIG['arch']}/sperf/#{RbConfig::CONFIG['RUBY_PROGRAM_VERSION']}/sperf.so"
+end
 
 module Sperf
 

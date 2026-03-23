@@ -3,7 +3,7 @@ require "rake/extensiontask"
 require "rake/testtask"
 
 Rake::ExtensionTask.new("sperf") do |ext|
-  ext.lib_dir = "lib"
+  ext.lib_dir = "tmp/ignore_lib"
 end
 
 Rake::TestTask.new(:test) do |t|
