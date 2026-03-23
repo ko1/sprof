@@ -562,26 +562,37 @@ Average error (%). Bold = <10%. ~~Struck~~ = >90%.
 
 ## Overhead Comparison
 
-Profiler overhead measured on the ratio#1 scenario (4M calls of `rw` methods with arg 0, ~2.5s baseline). All at 1000Hz. Each configuration was run 10 times; the table shows the median. Raw data is in `data/overhead_raw.tsv`.
+Profiler overhead measured on the ratio#1 scenario (4M calls of `rw` methods with arg 0, ~2.5s baseline). All at 1000Hz. Each configuration was run 10 times. Raw data is in `data/overhead_raw.tsv`.
 
-| Profiler | Mode | Elapsed (median) | Overhead | Sampling count | Sampling time |
-|----------|------|-------------------|----------|----------------|---------------|
-| *(none)* | wall | 2542ms | - | - | - |
-| **rperf** | cpu | 2641ms | ~4% | 2357 | 2.0ms (0.1%) |
-| **rperf** | wall | 2349ms | ~0% | 2152 | 1.3ms (0.1%) |
-| stackprof | cpu | 2231ms | ~0% | - | - |
-| stackprof | wall | 2304ms | ~0% | - | - |
-| vernier | wall | 2367ms | ~0% | - | - |
-| pf2 | cpu | 2523ms | ~0% | - | - |
-| pf2 | wall | 2591ms | ~2% | - | - |
+| Profiler | Mode | Median | Mean | StdDev | Min | Max |
+|----------|------|--------|------|--------|-----|-----|
+| *(none)* | wall | 2533ms | 2590ms | 206ms | 2391ms | 3045ms |
+| **rperf** | cpu | 2626ms | 2647ms | 162ms | 2429ms | 2970ms |
+| **rperf** | wall | 2333ms | 2303ms | 110ms | 2125ms | 2444ms |
+| stackprof | cpu | 2221ms | 2238ms | 114ms | 2088ms | 2438ms |
+| stackprof | wall | 2300ms | 2409ms | 263ms | 2176ms | 3012ms |
+| vernier | wall | 2367ms | 2326ms | 116ms | 2182ms | 2463ms |
+| pf2 | cpu | 2522ms | 2608ms | 165ms | 2503ms | 3055ms |
+| pf2 | wall | 2588ms | 2644ms | 159ms | 2530ms | 3059ms |
 
-- WSL2 scheduling noise causes high variance in the baseline (2391-3045ms range), making precise overhead comparison difficult. Most profilers show elapsed times within the baseline variance.
-- rperf's sampling overhead is negligible: ~2357 callbacks took ~2.0ms total (~0.9us/call).
+**rperf sampling overhead** (median of 10 runs):
+
+| Mode | Sampling count | Total sampling time | Per-callback |
+|------|----------------|---------------------|--------------|
+| cpu | 2357 | 2.0ms (0.1% of elapsed) | 0.9us |
+| wall | 2152 | 1.3ms (0.1% of elapsed) | 0.6us |
+
+**考察:**
+
+- ベースラインの標準偏差が 206ms（中央値の ~8%）あり、WSL2 のスケジューリングノイズが大きい。そのため、プロファイラ間のオーバーヘッド差は統計的に有意とは言い切れない。
+- ベースラインより速い計測値（stackprof cpu 2221ms < none 2533ms）が出ているのも、このノイズによるもの。
+- その中で pf2 の中央値（cpu 2522ms, wall 2588ms）はベースラインに近く、rperf cpu（2626ms）も同程度。
+- rperf のサンプリングコールバック自体のオーバーヘッドは極めて小さい: ~2300回のコールバックが合計 1.3-2.0ms（経過時間の 0.1%）。
 
 <details><summary>Reproduction commands</summary>
 
 ```bash
-ruby run_overhead.rb
+ruby run_overhead.rb   # 10 iterations per config, saves to data/overhead_raw.tsv
 ```
 
 </details>
