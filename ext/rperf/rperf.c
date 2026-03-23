@@ -118,7 +118,7 @@ typedef struct rperf_profiler {
     int frequency;
     int mode; /* 0 = cpu, 1 = wall */
     volatile int running;
-    pthread_t timer_thread;
+    pthread_t worker_thread;     /* combined timer + aggregation */
 #if RPERF_USE_TIMER_SIGNAL
     timer_t timer_id;
     int timer_signal;     /* >0: use timer signal, 0: use nanosleep thread */
@@ -131,11 +131,9 @@ typedef struct rperf_profiler {
     /* Aggregation (only used when aggregate=1) */
     rperf_frame_table_t frame_table;
     rperf_agg_table_t agg_table;
-    pthread_t agg_thread;
     volatile int swap_ready;     /* 1 = standby buffer ready for aggregation */
-    volatile int agg_stop;       /* 1 = signal aggregation thread to exit */
-    pthread_mutex_t agg_mutex;
-    pthread_cond_t agg_cond;
+    pthread_mutex_t worker_mutex;
+    pthread_cond_t worker_cond;
     rb_internal_thread_specific_key_t ts_key;
     rb_internal_thread_event_hook_t *thread_hook;
     /* GC tracking */
@@ -528,32 +526,15 @@ rperf_aggregate_buffer(rperf_profiler_t *prof, rperf_sample_buffer_t *buf)
 
 /* ---- Aggregation thread ---- */
 
-static void *
-rperf_agg_thread_func(void *arg)
+/* Try to aggregate the standby buffer if swap_ready is set.
+ * Called from worker thread (with or without worker_mutex held). */
+static void
+rperf_try_aggregate(rperf_profiler_t *prof)
 {
-    rperf_profiler_t *prof = (rperf_profiler_t *)arg;
-
-    CHECKED(pthread_mutex_lock(&prof->agg_mutex));
-    while (!prof->agg_stop) {
-        while (!prof->swap_ready && !prof->agg_stop) {
-            CHECKED(pthread_cond_wait(&prof->agg_cond, &prof->agg_mutex));
-        }
-        if (prof->agg_stop && !prof->swap_ready) break;
-
-        if (prof->swap_ready) {
-            int standby_idx = prof->active_idx ^ 1;
-            rperf_sample_buffer_t *buf = &prof->buffers[standby_idx];
-            CHECKED(pthread_mutex_unlock(&prof->agg_mutex));
-
-            rperf_aggregate_buffer(prof, buf);
-
-            CHECKED(pthread_mutex_lock(&prof->agg_mutex));
-            prof->swap_ready = 0;
-        }
-    }
-    CHECKED(pthread_mutex_unlock(&prof->agg_mutex));
-
-    return NULL;
+    if (!prof->aggregate || !prof->swap_ready) return;
+    int standby_idx = prof->active_idx ^ 1;
+    rperf_aggregate_buffer(prof, &prof->buffers[standby_idx]);
+    prof->swap_ready = 0;
 }
 
 /* ---- Record a sample ---- */
@@ -568,12 +549,10 @@ rperf_try_swap(rperf_profiler_t *prof)
 
     /* Swap active buffer */
     prof->active_idx ^= 1;
-
-    /* Signal aggregation thread */
-    CHECKED(pthread_mutex_lock(&prof->agg_mutex));
     prof->swap_ready = 1;
-    CHECKED(pthread_cond_signal(&prof->agg_cond));
-    CHECKED(pthread_mutex_unlock(&prof->agg_mutex));
+
+    /* Wake worker thread */
+    CHECKED(pthread_cond_signal(&prof->worker_cond));
 }
 
 static void
@@ -837,7 +816,7 @@ rperf_sample_job(void *arg)
         (ts_end.tv_nsec - ts_start.tv_nsec);
 }
 
-/* ---- Timer ---- */
+/* ---- Worker thread: timer + aggregation ---- */
 
 #if RPERF_USE_TIMER_SIGNAL
 static void
@@ -846,21 +825,66 @@ rperf_signal_handler(int sig)
     g_profiler.trigger_count++;
     rb_postponed_job_trigger(g_profiler.pj_handle);
 }
-#endif
 
+/* Worker thread for signal mode: aggregation only.
+ * Timer triggers are handled by the signal handler.
+ * Polls swap_ready with a short timedwait. */
 static void *
-rperf_timer_func(void *arg)
+rperf_worker_signal_func(void *arg)
 {
     rperf_profiler_t *prof = (rperf_profiler_t *)arg;
-    struct timespec interval;
-    interval.tv_sec = 0;
-    interval.tv_nsec = 1000000000L / prof->frequency;
+    struct timespec deadline;
 
+    CHECKED(pthread_mutex_lock(&prof->worker_mutex));
     while (prof->running) {
-        prof->trigger_count++;
-        rb_postponed_job_trigger(prof->pj_handle);
-        nanosleep(&interval, NULL);
+        clock_gettime(CLOCK_REALTIME, &deadline);
+        deadline.tv_nsec += 10000000L; /* 10ms poll interval */
+        if (deadline.tv_nsec >= 1000000000L) {
+            deadline.tv_sec++;
+            deadline.tv_nsec -= 1000000000L;
+        }
+        pthread_cond_timedwait(&prof->worker_cond, &prof->worker_mutex, &deadline);
+        rperf_try_aggregate(prof);
     }
+    CHECKED(pthread_mutex_unlock(&prof->worker_mutex));
+    return NULL;
+}
+#endif
+
+/* Worker thread for nanosleep mode: timer + aggregation.
+ * Uses pthread_cond_timedwait with absolute deadline.
+ * Timeout → trigger + advance deadline.
+ * Signal (swap_ready) → aggregate only, keep same deadline. */
+static void *
+rperf_worker_nanosleep_func(void *arg)
+{
+    rperf_profiler_t *prof = (rperf_profiler_t *)arg;
+    struct timespec deadline;
+    long interval_ns = 1000000000L / prof->frequency;
+
+    clock_gettime(CLOCK_REALTIME, &deadline);
+    deadline.tv_nsec += interval_ns;
+    if (deadline.tv_nsec >= 1000000000L) {
+        deadline.tv_sec++;
+        deadline.tv_nsec -= 1000000000L;
+    }
+
+    CHECKED(pthread_mutex_lock(&prof->worker_mutex));
+    while (prof->running) {
+        int ret = pthread_cond_timedwait(&prof->worker_cond, &prof->worker_mutex, &deadline);
+        if (ret == ETIMEDOUT) {
+            prof->trigger_count++;
+            rb_postponed_job_trigger(prof->pj_handle);
+            /* Advance deadline by interval */
+            deadline.tv_nsec += interval_ns;
+            if (deadline.tv_nsec >= 1000000000L) {
+                deadline.tv_sec++;
+                deadline.tv_nsec -= 1000000000L;
+            }
+        }
+        rperf_try_aggregate(prof);
+    }
+    CHECKED(pthread_mutex_unlock(&prof->worker_mutex));
     return NULL;
 }
 
@@ -947,34 +971,28 @@ rb_rperf_start(int argc, VALUE *argv, VALUE self)
     g_profiler.trigger_count = 0;
     g_profiler.active_idx = 0;
     g_profiler.swap_ready = 0;
-    g_profiler.agg_stop = 0;
+
+    /* Initialize worker mutex/cond */
+    CHECKED(pthread_mutex_init(&g_profiler.worker_mutex, NULL));
+    CHECKED(pthread_cond_init(&g_profiler.worker_cond, NULL));
 
     /* Initialize sample buffer(s) */
     if (rperf_sample_buffer_init(&g_profiler.buffers[0]) < 0) {
+        CHECKED(pthread_mutex_destroy(&g_profiler.worker_mutex));
+        CHECKED(pthread_cond_destroy(&g_profiler.worker_cond));
         rb_raise(rb_eNoMemError, "rperf: failed to allocate sample buffer 0");
     }
     if (aggregate) {
         if (rperf_sample_buffer_init(&g_profiler.buffers[1]) < 0) {
             rperf_sample_buffer_free(&g_profiler.buffers[0]);
+            CHECKED(pthread_mutex_destroy(&g_profiler.worker_mutex));
+            CHECKED(pthread_cond_destroy(&g_profiler.worker_cond));
             rb_raise(rb_eNoMemError, "rperf: failed to allocate sample buffer 1");
         }
 
         /* Initialize aggregation structures */
         rperf_frame_table_init(&g_profiler.frame_table);
         rperf_agg_table_init(&g_profiler.agg_table);
-
-        /* Start aggregation thread */
-        CHECKED(pthread_mutex_init(&g_profiler.agg_mutex, NULL));
-        CHECKED(pthread_cond_init(&g_profiler.agg_cond, NULL));
-        if (pthread_create(&g_profiler.agg_thread, NULL, rperf_agg_thread_func, &g_profiler) != 0) {
-            rperf_sample_buffer_free(&g_profiler.buffers[0]);
-            rperf_sample_buffer_free(&g_profiler.buffers[1]);
-            rperf_frame_table_free(&g_profiler.frame_table);
-            rperf_agg_table_free(&g_profiler.agg_table);
-            CHECKED(pthread_mutex_destroy(&g_profiler.agg_mutex));
-            CHECKED(pthread_cond_destroy(&g_profiler.agg_cond));
-            rb_raise(rb_eRuntimeError, "rperf: failed to create aggregation thread");
-        }
     }
 
     /* Register GC event hook */
@@ -1005,18 +1023,13 @@ rb_rperf_start(int argc, VALUE *argv, VALUE self)
             rb_internal_thread_remove_event_hook(g_profiler.thread_hook);
             g_profiler.thread_hook = NULL;
             if (g_profiler.aggregate) {
-                CHECKED(pthread_mutex_lock(&g_profiler.agg_mutex));
-                g_profiler.agg_stop = 1;
-                CHECKED(pthread_cond_signal(&g_profiler.agg_cond));
-                CHECKED(pthread_mutex_unlock(&g_profiler.agg_mutex));
-                CHECKED(pthread_join(g_profiler.agg_thread, NULL));
-                CHECKED(pthread_mutex_destroy(&g_profiler.agg_mutex));
-                CHECKED(pthread_cond_destroy(&g_profiler.agg_cond));
                 rperf_sample_buffer_free(&g_profiler.buffers[1]);
                 rperf_frame_table_free(&g_profiler.frame_table);
                 rperf_agg_table_free(&g_profiler.agg_table);
             }
             rperf_sample_buffer_free(&g_profiler.buffers[0]);
+            CHECKED(pthread_mutex_destroy(&g_profiler.worker_mutex));
+            CHECKED(pthread_cond_destroy(&g_profiler.worker_cond));
             rb_raise(rb_eNoMemError, "rperf: failed to allocate thread data");
         }
     }
@@ -1048,6 +1061,15 @@ rb_rperf_start(int argc, VALUE *argv, VALUE self)
             goto timer_fail;
         }
 
+        /* Start worker thread (aggregation only, timer via signal handler) */
+        if (pthread_create(&g_profiler.worker_thread, NULL,
+                           rperf_worker_signal_func, &g_profiler) != 0) {
+            g_profiler.running = 0;
+            timer_delete(g_profiler.timer_id);
+            signal(g_profiler.timer_signal, SIG_DFL);
+            goto timer_fail;
+        }
+
         its.it_value.tv_sec = 0;
         its.it_value.tv_nsec = 1000000000L / g_profiler.frequency;
         its.it_interval = its.it_value;
@@ -1055,7 +1077,9 @@ rb_rperf_start(int argc, VALUE *argv, VALUE self)
     } else
 #endif
     {
-        if (pthread_create(&g_profiler.timer_thread, NULL, rperf_timer_func, &g_profiler) != 0) {
+        /* Start worker thread (timer via timedwait + aggregation) */
+        if (pthread_create(&g_profiler.worker_thread, NULL,
+                           rperf_worker_nanosleep_func, &g_profiler) != 0) {
             g_profiler.running = 0;
             goto timer_fail;
         }
@@ -1074,18 +1098,13 @@ timer_fail:
         rb_internal_thread_remove_event_hook(g_profiler.thread_hook);
         g_profiler.thread_hook = NULL;
         if (g_profiler.aggregate) {
-            pthread_mutex_lock(&g_profiler.agg_mutex);
-            g_profiler.agg_stop = 1;
-            pthread_cond_signal(&g_profiler.agg_cond);
-            pthread_mutex_unlock(&g_profiler.agg_mutex);
-            pthread_join(g_profiler.agg_thread, NULL);
-            pthread_mutex_destroy(&g_profiler.agg_mutex);
-            pthread_cond_destroy(&g_profiler.agg_cond);
             rperf_sample_buffer_free(&g_profiler.buffers[1]);
             rperf_frame_table_free(&g_profiler.frame_table);
             rperf_agg_table_free(&g_profiler.agg_table);
         }
         rperf_sample_buffer_free(&g_profiler.buffers[0]);
+        CHECKED(pthread_mutex_destroy(&g_profiler.worker_mutex));
+        CHECKED(pthread_cond_destroy(&g_profiler.worker_cond));
         rb_raise(rb_eRuntimeError, "rperf: failed to create timer");
     }
 
@@ -1107,12 +1126,15 @@ rb_rperf_stop(VALUE self)
 #if RPERF_USE_TIMER_SIGNAL
     if (g_profiler.timer_signal > 0) {
         timer_delete(g_profiler.timer_id);
-        signal(g_profiler.timer_signal, SIG_DFL);
-    } else
-#endif
-    {
-        CHECKED(pthread_join(g_profiler.timer_thread, NULL));
+        signal(g_profiler.timer_signal, SIG_IGN);
     }
+#endif
+
+    /* Wake and join worker thread */
+    CHECKED(pthread_cond_signal(&g_profiler.worker_cond));
+    CHECKED(pthread_join(g_profiler.worker_thread, NULL));
+    CHECKED(pthread_mutex_destroy(&g_profiler.worker_mutex));
+    CHECKED(pthread_cond_destroy(&g_profiler.worker_cond));
 
     if (g_profiler.thread_hook) {
         rb_internal_thread_remove_event_hook(g_profiler.thread_hook);
@@ -1123,15 +1145,6 @@ rb_rperf_stop(VALUE self)
     rb_remove_event_hook(rperf_gc_event_hook);
 
     if (g_profiler.aggregate) {
-        /* Stop aggregation thread */
-        CHECKED(pthread_mutex_lock(&g_profiler.agg_mutex));
-        g_profiler.agg_stop = 1;
-        CHECKED(pthread_cond_signal(&g_profiler.agg_cond));
-        CHECKED(pthread_mutex_unlock(&g_profiler.agg_mutex));
-        CHECKED(pthread_join(g_profiler.agg_thread, NULL));
-        CHECKED(pthread_mutex_destroy(&g_profiler.agg_mutex));
-        CHECKED(pthread_cond_destroy(&g_profiler.agg_cond));
-
         /* Aggregate remaining samples from both buffers */
         if (g_profiler.swap_ready) {
             int standby_idx = g_profiler.active_idx ^ 1;
@@ -1305,7 +1318,6 @@ rperf_after_fork_child(void)
     g_profiler.sampling_count = 0;
     g_profiler.sampling_total_ns = 0;
     g_profiler.swap_ready = 0;
-    g_profiler.agg_stop = 0;
 }
 
 /* ---- Init ---- */
