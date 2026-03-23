@@ -32,22 +32,22 @@ rperf stat ruby fib.rb
 ```
  Performance stats for 'ruby fib.rb':
 
-           661.9 ms   user
-            24.1 ms   sys
-           602.8 ms   real
+           744.4 ms   user
+            32.0 ms   sys
+           491.0 ms   real
 
-           590.1 ms 100.0%  CPU execution
-             9.0 ms         [Ruby] GC time (8 count: 5 minor, 3 major)
-          99,774            [Ruby] allocated objects
-          49,270            [Ruby] freed objects
-              18 MB         [OS] peak memory (maxrss)
-              20            [OS] context switches (4 voluntary, 16 involuntary)
+           481.0 ms 100.0%  CPU execution
+            12.0 ms         [Ruby] GC time (9 count: 6 minor, 3 major)
+         154,468            [Ruby] allocated objects
+          66,596            [Ruby] freed objects
+              25 MB         [OS] peak memory (maxrss)
+              31            [OS] context switches (10 voluntary, 21 involuntary)
                0 MB         [OS] disk I/O (0 MB read, 0 MB write)
 
  Top 1 by flat:
-           590.1 ms 100.0%  Object#fib (fib.rb)
+           481.0 ms 100.0%  Object#fib (fib.rb)
 
-  590 samples (16 unique stacks), 0.2% profiler overhead
+  481 samples / 481 triggers, 0.1% profiler overhead
 ```
 
 The output tells you:

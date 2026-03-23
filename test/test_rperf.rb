@@ -391,7 +391,7 @@ class TestRperf < Test::Unit::TestCase
     assert_include output, "[OS] peak memory"
     assert_include output, "Top"
     assert_include output, "samples"
-    assert_include output, "unique stacks"
+    assert_include output, "triggers"
     assert_include output, "profiler overhead"
   end
 

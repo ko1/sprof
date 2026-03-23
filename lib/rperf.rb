@@ -317,11 +317,11 @@ module Rperf
   private_class_method :print_stat_top
 
   def self.print_stat_footer(samples_raw, real_ns, data)
-    unique_stacks = samples_raw.map { |frames, _| frames }.uniq.size
+    triggers = data[:trigger_count] || 0
     overhead_pct = real_ns > 0 ? (data[:sampling_time_ns] || 0) * 100.0 / real_ns : 0.0
     $stderr.puts
-    $stderr.puts format("  %d samples (%d unique stacks), %.1f%% profiler overhead",
-                        samples_raw.size, unique_stacks, overhead_pct)
+    $stderr.puts format("  %d samples / %d triggers, %.1f%% profiler overhead",
+                        samples_raw.size, triggers, overhead_pct)
   end
   private_class_method :print_stat_footer
 
