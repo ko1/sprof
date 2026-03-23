@@ -838,7 +838,6 @@ static void *
 rperf_worker_signal_func(void *arg)
 {
     rperf_profiler_t *prof = (rperf_profiler_t *)arg;
-    struct timespec deadline;
 
     /* Publish our kernel TID so start() can use it for SIGEV_THREAD_ID */
     CHECKED(pthread_mutex_lock(&prof->worker_mutex));
@@ -846,13 +845,7 @@ rperf_worker_signal_func(void *arg)
     CHECKED(pthread_cond_signal(&prof->worker_cond));
 
     while (prof->running) {
-        clock_gettime(CLOCK_REALTIME, &deadline);
-        deadline.tv_nsec += 10000000L; /* 10ms poll interval */
-        if (deadline.tv_nsec >= 1000000000L) {
-            deadline.tv_sec++;
-            deadline.tv_nsec -= 1000000000L;
-        }
-        pthread_cond_timedwait(&prof->worker_cond, &prof->worker_mutex, &deadline);
+        CHECKED(pthread_cond_wait(&prof->worker_cond, &prof->worker_mutex));
         rperf_try_aggregate(prof);
     }
     CHECKED(pthread_mutex_unlock(&prof->worker_mutex));
