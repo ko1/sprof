@@ -1,1 +1,25 @@
-manual_src/images/logo.svg
+<svg viewBox="0 0 280 160" xmlns="http://www.w3.org/2000/svg">
+  <!-- Gauge arc -->
+  <path d="M70,100 A70,70 0 0,1 210,100" fill="none" stroke="#cc342d" stroke-width="3"/>
+
+  <!-- Tick marks -->
+  <g stroke="#cc342d" stroke-width="1.5">
+    <line x1="76" y1="68" x2="82" y2="74"/>
+    <line x1="100" y1="42" x2="104" y2="50"/>
+    <line x1="140" y1="32" x2="140" y2="40"/>
+    <line x1="180" y1="42" x2="176" y2="50"/>
+    <line x1="204" y1="68" x2="198" y2="74"/>
+  </g>
+
+  <!-- Ruby gem (below 12 o'clock tick) -->
+  <g transform="translate(140,52)">
+    <polygon points="-5,-5.5 5,-5.5 7.5,-1.5 0,6.5 -7.5,-1.5" fill="none" stroke="#cc342d" stroke-width="0.9"/>
+  </g>
+
+  <!-- Needle (-30%) -->
+  <line x1="140" y1="100" x2="172" y2="69" stroke="#8a7038" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="140" cy="100" r="4" fill="#8a7038"/>
+
+  <!-- "rperf" text -->
+  <text x="140" y="148" text-anchor="middle" font-family="'Space Mono', monospace" font-size="24" font-weight="700" fill="#8a7038" letter-spacing="3">rperf</text>
+</svg>
