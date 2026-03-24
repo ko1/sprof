@@ -201,12 +201,12 @@ Synthetic frames (`[GVL blocked]`, `[GVL wait]`, `[GC marking]`, `[GC sweeping]`
 |--------|-------------|-------------|----------------|
 | Sample buffer (×2) | 16,384 | 32B | 512KB × 2 |
 | Frame pool (×2) | 131,072 | 8B (VALUE) | 1MB × 2 |
-| Frame table keys | 65,536 | 8B (VALUE) | 512KB |
-| Frame table buckets | 131,072 | 4B (uint32) | 512KB |
+| Frame table keys | 4,096 | 8B (VALUE) | 32KB |
+| Frame table buckets | 8,192 | 4B (uint32) | 32KB |
 | Agg table buckets | 2,048 | 28B | 56KB |
 | Stack pool | 4,096 | 4B (uint32) | 16KB |
 
-Total: ~4.6MB with `aggregate: true`, ~1.5MB with `aggregate: false` (single buffer only).
+Total: ~3.6MB with `aggregate: true`, ~1.5MB with `aggregate: false` (single buffer only). Frame table and aggregation table grow dynamically as needed.
 
 ## GC safety
 
@@ -215,13 +215,13 @@ Frame VALUEs must be protected from garbage collection. rperf wraps the profiler
 1. **Both frame pools** (active and standby buffers)
 2. **Frame table keys** (unique frame VALUEs, excluding synthetic frame slots)
 
-The frame table keys are pre-allocated (65,536 entries) and never reallocated, avoiding race conditions with the GC's mark phase which can run concurrently with the aggregation thread.
+The frame table keys array starts at 4,096 entries and grows by 2× when full. Growth allocates a new array, copies existing data, and swaps the pointer atomically (`memory_order_release`). The old array is kept alive until `stop` to prevent use-after-free if GC's mark phase is reading it concurrently. The `dmark` function loads the keys pointer with `memory_order_acquire` and the count with `memory_order_acquire` to ensure a consistent view.
 
 ## Per-thread data
 
 Each thread gets a `rperf_thread_data_t` struct stored via Ruby's thread-specific data API (`rb_internal_thread_specific_set`). This tracks:
 
-- `prev_cpu_ns`: Previous CPU time reading (for computing weight)
+- `prev_time_ns`: Previous time reading (for computing weight)
 - `prev_wall_ns`: Previous wall time reading
 - `suspended_at_ns`: Wall timestamp when thread was suspended
 - `ready_at_ns`: Wall timestamp when thread became ready
