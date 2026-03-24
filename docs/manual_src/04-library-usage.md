@@ -196,8 +196,17 @@ Rperf.labels      #=> {}
 Labels are written into pprof sample labels. Use `go tool pprof` to filter:
 
 ```bash
+# Filter to specific label value
 go tool pprof -tagfocus=request=abc-123 profile.pb.gz
+
+# Group by label at stack root ("which requests are slow?")
 go tool pprof -tagroot=request profile.pb.gz
+
+# Group by label at stack leaf ("who calls this function?")
+go tool pprof -tagleaf=request profile.pb.gz
+
+# Exclude specific label value
+go tool pprof -tagignore=request=healthcheck profile.pb.gz
 ```
 
 ### Reading labels

@@ -53,8 +53,14 @@ go tool pprof -tagroot=thread_seq profile.pb.gz
 # Filter by custom label
 go tool pprof -tagfocus=request=abc-123 profile.pb.gz
 
-# Group by custom label
+# Group by label at root ("which requests are slow?")
 go tool pprof -tagroot=request profile.pb.gz
+
+# Group by label at leaf ("who calls this function?")
+go tool pprof -tagleaf=request profile.pb.gz
+
+# Exclude by label
+go tool pprof -tagignore=request=healthcheck profile.pb.gz
 ```
 
 ## Collapsed stacks

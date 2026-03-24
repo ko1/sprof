@@ -188,9 +188,11 @@ end
 Rperf.labels      #=> {}
 ```
 
-In pprof output, filter by label:
+In pprof output, use labels for filtering and grouping:
 
     go tool pprof -tagfocus=request=abc-123 profile.pb.gz
+    go tool pprof -tagroot=request profile.pb.gz
+    go tool pprof -tagleaf=request profile.pb.gz
 
 ### Rperf.labels
 
@@ -237,6 +239,12 @@ View comments: `go tool pprof -comments profile.pb.gz`
 Group by thread: `go tool pprof -tagroot=thread_seq profile.pb.gz`
 
 Filter by label: `go tool pprof -tagfocus=request=abc-123 profile.pb.gz`
+
+Group by label (root): `go tool pprof -tagroot=request profile.pb.gz`
+
+Group by label (leaf): `go tool pprof -tagleaf=request profile.pb.gz`
+
+Exclude by label: `go tool pprof -tagignore=request=healthcheck profile.pb.gz`
 
 ### collapsed
 
