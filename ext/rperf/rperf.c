@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <assert.h>
+#include <stdatomic.h>
 #ifdef __linux__
 #include <sys/syscall.h>
 #endif
@@ -142,22 +143,22 @@ typedef struct rperf_stats {
 typedef struct rperf_profiler {
     int frequency;
     int mode; /* 0 = cpu, 1 = wall */
-    volatile int running;
+    _Atomic int running;
     pthread_t worker_thread;     /* combined timer + aggregation */
 #if RPERF_USE_TIMER_SIGNAL
     timer_t timer_id;
     int timer_signal;     /* >0: use timer signal, 0: use nanosleep thread */
-    volatile pid_t worker_tid;   /* kernel TID of worker thread (for SIGEV_THREAD_ID) */
+    _Atomic pid_t worker_tid;    /* kernel TID of worker thread (for SIGEV_THREAD_ID) */
 #endif
     rb_postponed_job_handle_t pj_handle;
     int aggregate;               /* 1 = aggregate samples, 0 = raw */
     /* Double-buffered sample storage (only buffers[0] used when !aggregate) */
     rperf_sample_buffer_t buffers[2];
-    int active_idx;              /* 0 or 1 */
+    _Atomic int active_idx;      /* 0 or 1 */
     /* Aggregation (only used when aggregate=1) */
     rperf_frame_table_t frame_table;
     rperf_agg_table_t agg_table;
-    volatile int swap_ready;     /* 1 = standby buffer ready for aggregation */
+    _Atomic int swap_ready;      /* 1 = standby buffer ready for aggregation */
     pthread_mutex_t worker_mutex;
     pthread_cond_t worker_cond;
     rb_internal_thread_specific_key_t ts_key;
@@ -574,10 +575,10 @@ rperf_aggregate_buffer(rperf_profiler_t *prof, rperf_sample_buffer_t *buf)
 static void
 rperf_try_aggregate(rperf_profiler_t *prof)
 {
-    if (!prof->aggregate || !prof->swap_ready) return;
-    int standby_idx = prof->active_idx ^ 1;
+    if (!prof->aggregate || !atomic_load_explicit(&prof->swap_ready, memory_order_acquire)) return;
+    int standby_idx = atomic_load_explicit(&prof->active_idx, memory_order_acquire) ^ 1;
     rperf_aggregate_buffer(prof, &prof->buffers[standby_idx]);
-    prof->swap_ready = 0;
+    atomic_store_explicit(&prof->swap_ready, 0, memory_order_release);
 }
 
 /* ---- Record a sample ---- */
@@ -586,13 +587,14 @@ static void
 rperf_try_swap(rperf_profiler_t *prof)
 {
     if (!prof->aggregate) return;
-    rperf_sample_buffer_t *buf = &prof->buffers[prof->active_idx];
+    int idx = atomic_load_explicit(&prof->active_idx, memory_order_relaxed);
+    rperf_sample_buffer_t *buf = &prof->buffers[idx];
     if (buf->sample_count < RPERF_AGG_THRESHOLD) return;
-    if (prof->swap_ready) return; /* standby still being aggregated */
+    if (atomic_load_explicit(&prof->swap_ready, memory_order_relaxed)) return; /* standby still being aggregated */
 
-    /* Swap active buffer */
-    prof->active_idx ^= 1;
-    prof->swap_ready = 1;
+    /* Swap active buffer: release ensures buffer writes are visible to worker */
+    atomic_store_explicit(&prof->active_idx, idx ^ 1, memory_order_release);
+    atomic_store_explicit(&prof->swap_ready, 1, memory_order_release);
 
     /* Wake worker thread */
     CHECKED(pthread_cond_signal(&prof->worker_cond));
@@ -603,7 +605,7 @@ rperf_record_sample(rperf_profiler_t *prof, size_t frame_start, int depth,
                     int64_t weight, int type, int thread_seq)
 {
     if (weight <= 0) return;
-    rperf_sample_buffer_t *buf = &prof->buffers[prof->active_idx];
+    rperf_sample_buffer_t *buf = &prof->buffers[atomic_load_explicit(&prof->active_idx, memory_order_relaxed)];
     if (rperf_ensure_sample_capacity(buf) < 0) return;
 
     rperf_sample_t *sample = &buf->samples[buf->sample_count];
@@ -653,7 +655,7 @@ rperf_handle_suspended(rperf_profiler_t *prof, VALUE thread)
     if (time_now < 0) return;
 
     /* Capture backtrace into active buffer's frame_pool */
-    rperf_sample_buffer_t *buf = &prof->buffers[prof->active_idx];
+    rperf_sample_buffer_t *buf = &prof->buffers[atomic_load_explicit(&prof->active_idx, memory_order_relaxed)];
     if (rperf_ensure_frame_pool_capacity(buf, RPERF_MAX_STACK_DEPTH) < 0) return;
     size_t frame_start = buf->frame_pool_count;
     int depth = rb_profile_frames(0, RPERF_MAX_STACK_DEPTH,
@@ -773,7 +775,7 @@ rperf_gc_event_hook(rb_event_flag_t event, VALUE data, VALUE self, ID id, VALUE 
         /* Capture backtrace and timestamp at GC entry */
         prof->gc.enter_ns = rperf_wall_time_ns();
 
-        rperf_sample_buffer_t *buf = &prof->buffers[prof->active_idx];
+        rperf_sample_buffer_t *buf = &prof->buffers[atomic_load_explicit(&prof->active_idx, memory_order_relaxed)];
         if (rperf_ensure_frame_pool_capacity(buf, RPERF_MAX_STACK_DEPTH) < 0) return;
         size_t frame_start = buf->frame_pool_count;
         int depth = rb_profile_frames(0, RPERF_MAX_STACK_DEPTH,
@@ -841,7 +843,7 @@ rperf_sample_job(void *arg)
     if (weight <= 0) return;
 
     /* Capture backtrace and record sample */
-    rperf_sample_buffer_t *buf = &prof->buffers[prof->active_idx];
+    rperf_sample_buffer_t *buf = &prof->buffers[atomic_load_explicit(&prof->active_idx, memory_order_relaxed)];
     if (rperf_ensure_frame_pool_capacity(buf, RPERF_MAX_STACK_DEPTH) < 0) return;
 
     size_t frame_start = buf->frame_pool_count;
@@ -976,8 +978,8 @@ rb_rperf_start(VALUE self, VALUE vfreq, VALUE vmode, VALUE vagg, VALUE vsig)
     g_profiler.stats.sampling_count = 0;
     g_profiler.stats.sampling_total_ns = 0;
     g_profiler.stats.trigger_count = 0;
-    g_profiler.active_idx = 0;
-    g_profiler.swap_ready = 0;
+    atomic_store_explicit(&g_profiler.active_idx, 0, memory_order_relaxed);
+    atomic_store_explicit(&g_profiler.swap_ready, 0, memory_order_relaxed);
 
     /* Initialize worker mutex/cond */
     CHECKED(pthread_mutex_init(&g_profiler.worker_mutex, NULL));
@@ -1163,13 +1165,15 @@ rb_rperf_stop(VALUE self)
     rb_remove_event_hook(rperf_gc_event_hook);
 
     if (g_profiler.aggregate) {
+        /* Worker thread is joined; no concurrent access to these atomics. */
+        int cur_idx = atomic_load_explicit(&g_profiler.active_idx, memory_order_relaxed);
         /* Aggregate remaining samples from both buffers */
-        if (g_profiler.swap_ready) {
-            int standby_idx = g_profiler.active_idx ^ 1;
+        if (atomic_load_explicit(&g_profiler.swap_ready, memory_order_relaxed)) {
+            int standby_idx = cur_idx ^ 1;
             rperf_aggregate_buffer(&g_profiler, &g_profiler.buffers[standby_idx]);
-            g_profiler.swap_ready = 0;
+            atomic_store_explicit(&g_profiler.swap_ready, 0, memory_order_relaxed);
         }
-        rperf_aggregate_buffer(&g_profiler, &g_profiler.buffers[g_profiler.active_idx]);
+        rperf_aggregate_buffer(&g_profiler, &g_profiler.buffers[cur_idx]);
     }
 
     /* Clean up thread-specific data for all live threads */
@@ -1337,7 +1341,7 @@ rperf_after_fork_child(void)
     /* Reset stats */
     g_profiler.stats.sampling_count = 0;
     g_profiler.stats.sampling_total_ns = 0;
-    g_profiler.swap_ready = 0;
+    atomic_store_explicit(&g_profiler.swap_ready, 0, memory_order_relaxed);
 }
 
 /* ---- Init ---- */
