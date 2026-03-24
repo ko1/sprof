@@ -1006,6 +1006,90 @@ rperf_resolve_frame(VALUE fval)
     return rb_ary_new3(2, path, label);
 }
 
+/* ---- Shared helpers for stop/snapshot ---- */
+
+/* Flush pending sample buffers into agg_table.
+ * Caller must ensure no concurrent access (worker joined or mutex held). */
+static void
+rperf_flush_buffers(rperf_profiler_t *prof)
+{
+    int cur_idx = atomic_load_explicit(&prof->active_idx, memory_order_acquire);
+    if (atomic_load_explicit(&prof->swap_ready, memory_order_acquire)) {
+        int standby_idx = cur_idx ^ 1;
+        rperf_aggregate_buffer(prof, &prof->buffers[standby_idx]);
+        atomic_store_explicit(&prof->swap_ready, 0, memory_order_release);
+    }
+    rperf_aggregate_buffer(prof, &prof->buffers[cur_idx]);
+}
+
+/* Build result hash from aggregated data (agg_table + frame_table).
+ * Does NOT free any resources.  Caller must hold GVL. */
+static VALUE
+rperf_build_aggregated_result(rperf_profiler_t *prof)
+{
+    VALUE result, samples_ary;
+    size_t i;
+    int j;
+
+    result = rb_hash_new();
+
+    rb_hash_aset(result, ID2SYM(rb_intern("mode")),
+                 ID2SYM(rb_intern(prof->mode == 1 ? "wall" : "cpu")));
+    rb_hash_aset(result, ID2SYM(rb_intern("frequency")), INT2NUM(prof->frequency));
+    rb_hash_aset(result, ID2SYM(rb_intern("trigger_count")), SIZET2NUM(prof->stats.trigger_count));
+    rb_hash_aset(result, ID2SYM(rb_intern("sampling_count")), SIZET2NUM(prof->stats.sampling_count));
+    rb_hash_aset(result, ID2SYM(rb_intern("sampling_time_ns")), LONG2NUM(prof->stats.sampling_total_ns));
+    rb_hash_aset(result, ID2SYM(rb_intern("detected_thread_count")), INT2NUM(prof->next_thread_seq));
+    rb_hash_aset(result, ID2SYM(rb_intern("unique_frames")),
+                 SIZET2NUM(prof->frame_table.count - RPERF_SYNTHETIC_COUNT));
+    rb_hash_aset(result, ID2SYM(rb_intern("unique_stacks")),
+                 SIZET2NUM(prof->agg_table.count));
+
+    {
+        struct timespec now_monotonic;
+        int64_t start_ns, duration_ns;
+        clock_gettime(CLOCK_MONOTONIC, &now_monotonic);
+        start_ns = (int64_t)prof->start_realtime.tv_sec * 1000000000LL
+                 + (int64_t)prof->start_realtime.tv_nsec;
+        duration_ns = ((int64_t)now_monotonic.tv_sec - (int64_t)prof->start_monotonic.tv_sec) * 1000000000LL
+                    + ((int64_t)now_monotonic.tv_nsec - (int64_t)prof->start_monotonic.tv_nsec);
+        rb_hash_aset(result, ID2SYM(rb_intern("start_time_ns")), LONG2NUM(start_ns));
+        rb_hash_aset(result, ID2SYM(rb_intern("duration_ns")), LONG2NUM(duration_ns));
+    }
+
+    {
+        rperf_frame_table_t *ft = &prof->frame_table;
+        VALUE resolved_ary = rb_ary_new_capa((long)ft->count);
+        rb_ary_push(resolved_ary, rb_ary_new3(2, rb_str_new_lit("<GVL>"), rb_str_new_lit("[GVL blocked]")));
+        rb_ary_push(resolved_ary, rb_ary_new3(2, rb_str_new_lit("<GVL>"), rb_str_new_lit("[GVL wait]")));
+        rb_ary_push(resolved_ary, rb_ary_new3(2, rb_str_new_lit("<GC>"),  rb_str_new_lit("[GC marking]")));
+        rb_ary_push(resolved_ary, rb_ary_new3(2, rb_str_new_lit("<GC>"),  rb_str_new_lit("[GC sweeping]")));
+        for (i = RPERF_SYNTHETIC_COUNT; i < ft->count; i++) {
+            rb_ary_push(resolved_ary, rperf_resolve_frame(atomic_load_explicit(&ft->keys, memory_order_relaxed)[i]));
+        }
+
+        rperf_agg_table_t *at = &prof->agg_table;
+        samples_ary = rb_ary_new();
+        for (i = 0; i < at->bucket_capacity; i++) {
+            rperf_agg_entry_t *e = &at->buckets[i];
+            if (!e->used) continue;
+
+            VALUE frames = rb_ary_new_capa(e->depth);
+            for (j = 0; j < e->depth; j++) {
+                uint32_t fid = at->stack_pool[e->frame_start + j];
+                rb_ary_push(frames, RARRAY_AREF(resolved_ary, fid));
+            }
+
+            VALUE sample = rb_ary_new3(3, frames, LONG2NUM(e->weight), INT2NUM(e->thread_seq));
+            rb_ary_push(samples_ary, sample);
+        }
+    }
+
+    rb_hash_aset(result, ID2SYM(rb_intern("aggregated_samples")), samples_ary);
+
+    return result;
+}
+
 /* ---- Ruby API ---- */
 
 /* _c_start(frequency, mode, aggregate, signal)
@@ -1259,15 +1343,8 @@ rb_rperf_stop(VALUE self)
     rb_remove_event_hook(rperf_gc_event_hook);
 
     if (g_profiler.aggregate) {
-        /* Worker thread is joined; no concurrent access to these atomics. */
-        int cur_idx = atomic_load_explicit(&g_profiler.active_idx, memory_order_relaxed);
-        /* Aggregate remaining samples from both buffers */
-        if (atomic_load_explicit(&g_profiler.swap_ready, memory_order_relaxed)) {
-            int standby_idx = cur_idx ^ 1;
-            rperf_aggregate_buffer(&g_profiler, &g_profiler.buffers[standby_idx]);
-            atomic_store_explicit(&g_profiler.swap_ready, 0, memory_order_relaxed);
-        }
-        rperf_aggregate_buffer(&g_profiler, &g_profiler.buffers[cur_idx]);
+        /* Worker thread is joined; no concurrent access. */
+        rperf_flush_buffers(&g_profiler);
     }
 
     /* Clean up thread-specific data for all live threads */
@@ -1285,73 +1362,8 @@ rb_rperf_stop(VALUE self)
         }
     }
 
-    /* Build result hash */
-    result = rb_hash_new();
-
-    /* mode */
-    rb_hash_aset(result, ID2SYM(rb_intern("mode")),
-                 ID2SYM(rb_intern(g_profiler.mode == 1 ? "wall" : "cpu")));
-
-    /* frequency */
-    rb_hash_aset(result, ID2SYM(rb_intern("frequency")), INT2NUM(g_profiler.frequency));
-
-    /* trigger_count, sampling_count, sampling_time_ns, detected_thread_count */
-    rb_hash_aset(result, ID2SYM(rb_intern("trigger_count")), SIZET2NUM(g_profiler.stats.trigger_count));
-    rb_hash_aset(result, ID2SYM(rb_intern("sampling_count")), SIZET2NUM(g_profiler.stats.sampling_count));
-    rb_hash_aset(result, ID2SYM(rb_intern("sampling_time_ns")), LONG2NUM(g_profiler.stats.sampling_total_ns));
-    rb_hash_aset(result, ID2SYM(rb_intern("detected_thread_count")), INT2NUM(g_profiler.next_thread_seq));
-
-    /* aggregation stats */
     if (g_profiler.aggregate) {
-        rb_hash_aset(result, ID2SYM(rb_intern("unique_frames")),
-                     SIZET2NUM(g_profiler.frame_table.count - RPERF_SYNTHETIC_COUNT));
-        rb_hash_aset(result, ID2SYM(rb_intern("unique_stacks")),
-                     SIZET2NUM(g_profiler.agg_table.count));
-    }
-
-    /* start_time_ns (CLOCK_REALTIME epoch nanos), duration_ns (CLOCK_MONOTONIC delta) */
-    {
-        struct timespec stop_monotonic;
-        int64_t start_ns, duration_ns;
-        clock_gettime(CLOCK_MONOTONIC, &stop_monotonic);
-        start_ns = (int64_t)g_profiler.start_realtime.tv_sec * 1000000000LL
-                 + (int64_t)g_profiler.start_realtime.tv_nsec;
-        duration_ns = ((int64_t)stop_monotonic.tv_sec - (int64_t)g_profiler.start_monotonic.tv_sec) * 1000000000LL
-                    + ((int64_t)stop_monotonic.tv_nsec - (int64_t)g_profiler.start_monotonic.tv_nsec);
-        rb_hash_aset(result, ID2SYM(rb_intern("start_time_ns")), LONG2NUM(start_ns));
-        rb_hash_aset(result, ID2SYM(rb_intern("duration_ns")), LONG2NUM(duration_ns));
-    }
-
-    if (g_profiler.aggregate) {
-        /* Build samples from aggregation table.
-         * Use a Ruby array for resolved frames so GC protects them. */
-        rperf_frame_table_t *ft = &g_profiler.frame_table;
-        VALUE resolved_ary = rb_ary_new_capa((long)ft->count);
-        /* Synthetic frames */
-        rb_ary_push(resolved_ary, rb_ary_new3(2, rb_str_new_lit("<GVL>"), rb_str_new_lit("[GVL blocked]")));
-        rb_ary_push(resolved_ary, rb_ary_new3(2, rb_str_new_lit("<GVL>"), rb_str_new_lit("[GVL wait]")));
-        rb_ary_push(resolved_ary, rb_ary_new3(2, rb_str_new_lit("<GC>"),  rb_str_new_lit("[GC marking]")));
-        rb_ary_push(resolved_ary, rb_ary_new3(2, rb_str_new_lit("<GC>"),  rb_str_new_lit("[GC sweeping]")));
-        /* Real frames */
-        for (i = RPERF_SYNTHETIC_COUNT; i < ft->count; i++) {
-            rb_ary_push(resolved_ary, rperf_resolve_frame(atomic_load_explicit(&ft->keys, memory_order_relaxed)[i]));
-        }
-
-        rperf_agg_table_t *at = &g_profiler.agg_table;
-        samples_ary = rb_ary_new();
-        for (i = 0; i < at->bucket_capacity; i++) {
-            rperf_agg_entry_t *e = &at->buckets[i];
-            if (!e->used) continue;
-
-            VALUE frames = rb_ary_new_capa(e->depth);
-            for (j = 0; j < e->depth; j++) {
-                uint32_t fid = at->stack_pool[e->frame_start + j];
-                rb_ary_push(frames, RARRAY_AREF(resolved_ary, fid));
-            }
-
-            VALUE sample = rb_ary_new3(3, frames, LONG2NUM(e->weight), INT2NUM(e->thread_seq));
-            rb_ary_push(samples_ary, sample);
-        }
+        result = rperf_build_aggregated_result(&g_profiler);
 
         rperf_sample_buffer_free(&g_profiler.buffers[1]);
         rperf_frame_table_free(&g_profiler.frame_table);
@@ -1359,6 +1371,27 @@ rb_rperf_stop(VALUE self)
     } else {
         /* Raw samples path (aggregate: false) */
         rperf_sample_buffer_t *buf = &g_profiler.buffers[0];
+
+        result = rb_hash_new();
+        rb_hash_aset(result, ID2SYM(rb_intern("mode")),
+                     ID2SYM(rb_intern(g_profiler.mode == 1 ? "wall" : "cpu")));
+        rb_hash_aset(result, ID2SYM(rb_intern("frequency")), INT2NUM(g_profiler.frequency));
+        rb_hash_aset(result, ID2SYM(rb_intern("trigger_count")), SIZET2NUM(g_profiler.stats.trigger_count));
+        rb_hash_aset(result, ID2SYM(rb_intern("sampling_count")), SIZET2NUM(g_profiler.stats.sampling_count));
+        rb_hash_aset(result, ID2SYM(rb_intern("sampling_time_ns")), LONG2NUM(g_profiler.stats.sampling_total_ns));
+        rb_hash_aset(result, ID2SYM(rb_intern("detected_thread_count")), INT2NUM(g_profiler.next_thread_seq));
+        {
+            struct timespec stop_monotonic;
+            int64_t start_ns, duration_ns;
+            clock_gettime(CLOCK_MONOTONIC, &stop_monotonic);
+            start_ns = (int64_t)g_profiler.start_realtime.tv_sec * 1000000000LL
+                     + (int64_t)g_profiler.start_realtime.tv_nsec;
+            duration_ns = ((int64_t)stop_monotonic.tv_sec - (int64_t)g_profiler.start_monotonic.tv_sec) * 1000000000LL
+                        + ((int64_t)stop_monotonic.tv_nsec - (int64_t)g_profiler.start_monotonic.tv_nsec);
+            rb_hash_aset(result, ID2SYM(rb_intern("start_time_ns")), LONG2NUM(start_ns));
+            rb_hash_aset(result, ID2SYM(rb_intern("duration_ns")), LONG2NUM(duration_ns));
+        }
+
         samples_ary = rb_ary_new_capa((long)buf->sample_count);
         for (i = 0; i < buf->sample_count; i++) {
             rperf_sample_t *s = &buf->samples[i];
@@ -1387,15 +1420,38 @@ rb_rperf_stop(VALUE self)
             VALUE sample = rb_ary_new3(3, frames, LONG2NUM(s->weight), INT2NUM(s->thread_seq));
             rb_ary_push(samples_ary, sample);
         }
+        rb_hash_aset(result, ID2SYM(rb_intern("raw_samples")), samples_ary);
     }
-    rb_hash_aset(result,
-                 ID2SYM(rb_intern(g_profiler.aggregate ? "aggregated_samples" : "raw_samples")),
-                 samples_ary);
 
     /* Cleanup */
     rperf_sample_buffer_free(&g_profiler.buffers[0]);
 
     return result;
+}
+
+/* ---- Snapshot: read aggregated data without stopping ---- */
+
+static VALUE
+rb_rperf_snapshot(VALUE self)
+{
+    if (!g_profiler.running) {
+        return Qnil;
+    }
+
+    if (!g_profiler.aggregate) {
+        rb_raise(rb_eRuntimeError, "snapshot requires aggregate mode (aggregate: true)");
+    }
+
+    /* GVL is held → no postponed jobs fire → no new samples written.
+     * Lock worker_mutex to pause worker thread's aggregation. */
+    CHECKED(pthread_mutex_lock(&g_profiler.worker_mutex));
+    rperf_flush_buffers(&g_profiler);
+    CHECKED(pthread_mutex_unlock(&g_profiler.worker_mutex));
+
+    /* Safe to read agg_table/frame_table without lock:
+     * worker only touches them via swap_ready buffers (now empty),
+     * and GVL prevents new samples. */
+    return rperf_build_aggregated_result(&g_profiler);
 }
 
 /* ---- Fork safety ---- */
@@ -1459,6 +1515,7 @@ Init_rperf(void)
     VALUE mRperf = rb_define_module("Rperf");
     rb_define_module_function(mRperf, "_c_start", rb_rperf_start, 4);
     rb_define_module_function(mRperf, "_c_stop", rb_rperf_stop, 0);
+    rb_define_module_function(mRperf, "_c_snapshot", rb_rperf_snapshot, 0);
 
     memset(&g_profiler, 0, sizeof(g_profiler));
     g_profiler.pj_handle = rb_postponed_job_preregister(0, rperf_sample_job, &g_profiler);

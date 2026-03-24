@@ -84,6 +84,14 @@ module Rperf
     data
   end
 
+  # Returns a snapshot of the current profiling data without stopping.
+  # Only works in aggregate mode (the default). Returns nil if not profiling.
+  # The returned data has the same format as stop's return value and can be
+  # passed to save(), PProf.encode(), Collapsed.encode(), or Text.encode().
+  def self.snapshot
+    _c_snapshot
+  end
+
   # Saves profiling data to a file.
   # format: :pprof, :collapsed, or :text. nil = auto-detect from path extension
   #   .collapsed → collapsed stacks (FlameGraph / speedscope compatible)
