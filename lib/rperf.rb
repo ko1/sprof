@@ -25,6 +25,7 @@ module Rperf
   #   otherwise (.pb.gz etc) → pprof protobuf (gzip compressed)
   def self.start(frequency: 1000, mode: :cpu, output: nil, verbose: false, format: nil, stat: false, signal: nil, aggregate: true)
     raise ArgumentError, "frequency must be a positive integer (got #{frequency.inspect})" unless frequency.is_a?(Integer) && frequency > 0
+    raise ArgumentError, "frequency must be <= 10000 (10KHz), got #{frequency}" if frequency > 10_000
     c_mode = mode == :cpu ? 0 : 1
     c_signal = signal.nil? ? -1 : (signal ? signal.to_i : 0)
     if c_signal > 0

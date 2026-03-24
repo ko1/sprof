@@ -213,6 +213,11 @@ if frequency <= 0
   exit 1
 end
 
+if frequency > 10_000
+  $stderr.puts "Error: frequency must be <= 10000 (10KHz), got #{frequency}"
+  exit 1
+end
+
 if signal && signal != "false"
   sig_num = signal.to_i
   uncatchable = [Signal.list["KILL"], Signal.list["STOP"]].compact

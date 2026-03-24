@@ -121,6 +121,10 @@ class TestRperf < Test::Unit::TestCase
     assert_raise(ArgumentError) { Rperf.start(frequency: 1.5) }
   end
 
+  def test_frequency_too_high_raises
+    assert_raise(ArgumentError) { Rperf.start(frequency: 10_001) }
+  end
+
   def test_signal_kill_raises
     assert_raise(ArgumentError) { Rperf.start(signal: 9) }  # SIGKILL
   end
