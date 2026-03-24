@@ -128,6 +128,66 @@ class TestRperf < Test::Unit::TestCase
     assert_include output, "frequency must be a positive integer"
   end
 
+  # --- aggregate: false + output format tests ---
+
+  def test_no_aggregate_has_both_keys
+    data = Rperf.start(frequency: 500, aggregate: false) do
+      5_000_000.times { 1 + 1 }
+    end
+
+    assert_not_nil data
+    assert_include data, :raw_samples, "Should have raw_samples"
+    assert_include data, :aggregated_samples, "Should have aggregated_samples built from raw"
+    assert_operator data[:raw_samples].size, :>, 0
+    assert_operator data[:aggregated_samples].size, :>, 0
+  end
+
+  def test_no_aggregate_pprof_output
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "test.pb.gz")
+      Rperf.start(output: path, frequency: 500, aggregate: false) do
+        5_000_000.times { 1 + 1 }
+      end
+
+      assert File.exist?(path), "pprof output should be created with --no-aggregate"
+      content = File.binread(path)
+      assert_equal "\x1f\x8b".b, content[0, 2], "Should be gzip format"
+    end
+  end
+
+  def test_no_aggregate_collapsed_output
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "test.collapsed")
+      Rperf.start(output: path, frequency: 500, aggregate: false) do
+        5_000_000.times { 1 + 1 }
+      end
+
+      assert File.exist?(path)
+      content = File.read(path)
+      lines = content.strip.split("\n")
+      assert_operator lines.size, :>, 0
+
+      lines.each do |line|
+        _stack, weight_str = line.rpartition(" ").then { |s, _, w| [s, w] }
+        assert_operator weight_str.to_i, :>, 0
+      end
+    end
+  end
+
+  def test_no_aggregate_text_output
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "test.txt")
+      Rperf.start(output: path, frequency: 500, aggregate: false) do
+        5_000_000.times { 1 + 1 }
+      end
+
+      assert File.exist?(path)
+      content = File.read(path)
+      assert_include content, "Total:"
+      assert_include content, "Flat:"
+    end
+  end
+
   # --- Boundary / realloc tests ---
 
   # Sample buffer initial capacity is 1024.

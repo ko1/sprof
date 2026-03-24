@@ -47,6 +47,21 @@ module Rperf
     data = _c_stop
     return unless data
 
+    # When aggregate: false, C extension returns :raw_samples but not
+    # :aggregated_samples.  Build aggregated view so encoders always work.
+    if data[:raw_samples] && !data[:aggregated_samples]
+      merged = {}
+      data[:raw_samples].each do |frames, weight, thread_seq|
+        key = [frames, thread_seq || 0]
+        if merged.key?(key)
+          merged[key] += weight
+        else
+          merged[key] = weight
+        end
+      end
+      data[:aggregated_samples] = merged.map { |(frames, ts), w| [frames, w, ts] }
+    end
+
     print_stats(data) if @verbose
     print_stat(data) if @stat
 
