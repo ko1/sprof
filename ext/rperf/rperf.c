@@ -628,13 +628,13 @@ rperf_try_swap(rperf_profiler_t *prof)
     CHECKED(pthread_cond_signal(&prof->worker_cond));
 }
 
-static void
-rperf_record_sample(rperf_profiler_t *prof, size_t frame_start, int depth,
-                    int64_t weight, int type, int thread_seq)
+/* Write a sample into a specific buffer. No swap check. */
+static int
+rperf_write_sample(rperf_sample_buffer_t *buf, size_t frame_start, int depth,
+                   int64_t weight, int type, int thread_seq)
 {
-    if (weight <= 0) return;
-    rperf_sample_buffer_t *buf = &prof->buffers[atomic_load_explicit(&prof->active_idx, memory_order_relaxed)];
-    if (rperf_ensure_sample_capacity(buf) < 0) return;
+    if (weight <= 0) return 0;
+    if (rperf_ensure_sample_capacity(buf) < 0) return -1;
 
     rperf_sample_t *sample = &buf->samples[buf->sample_count];
     sample->depth = depth;
@@ -643,7 +643,15 @@ rperf_record_sample(rperf_profiler_t *prof, size_t frame_start, int depth,
     sample->type = type;
     sample->thread_seq = thread_seq;
     buf->sample_count++;
+    return 0;
+}
 
+static void
+rperf_record_sample(rperf_profiler_t *prof, size_t frame_start, int depth,
+                    int64_t weight, int type, int thread_seq)
+{
+    rperf_sample_buffer_t *buf = &prof->buffers[atomic_load_explicit(&prof->active_idx, memory_order_relaxed)];
+    rperf_write_sample(buf, frame_start, depth, weight, type, thread_seq);
     rperf_try_swap(prof);
 }
 
@@ -743,31 +751,16 @@ rperf_handle_resumed(rperf_profiler_t *prof, VALUE thread)
         if (depth <= 0) goto skip_gvl;
         buf->frame_pool_count += depth;
 
-        /* Write both samples directly into buf (bypass rperf_record_sample
-         * to avoid a mid-pair buffer swap) */
+        /* Write both samples into the same buf, then swap-check once */
         if (td->ready_at_ns > 0 && td->ready_at_ns > td->suspended_at_ns) {
             int64_t blocked_ns = td->ready_at_ns - td->suspended_at_ns;
-            if (blocked_ns > 0 && rperf_ensure_sample_capacity(buf) == 0) {
-                rperf_sample_t *s = &buf->samples[buf->sample_count];
-                s->depth = depth;
-                s->frame_start = frame_start;
-                s->weight = blocked_ns;
-                s->type = RPERF_SAMPLE_GVL_BLOCKED;
-                s->thread_seq = td->thread_seq;
-                buf->sample_count++;
-            }
+            rperf_write_sample(buf, frame_start, depth, blocked_ns,
+                               RPERF_SAMPLE_GVL_BLOCKED, td->thread_seq);
         }
         if (td->ready_at_ns > 0 && wall_now > td->ready_at_ns) {
             int64_t wait_ns = wall_now - td->ready_at_ns;
-            if (wait_ns > 0 && rperf_ensure_sample_capacity(buf) == 0) {
-                rperf_sample_t *s = &buf->samples[buf->sample_count];
-                s->depth = depth;
-                s->frame_start = frame_start;
-                s->weight = wait_ns;
-                s->type = RPERF_SAMPLE_GVL_WAIT;
-                s->thread_seq = td->thread_seq;
-                buf->sample_count++;
-            }
+            rperf_write_sample(buf, frame_start, depth, wait_ns,
+                               RPERF_SAMPLE_GVL_WAIT, td->thread_seq);
         }
 
         rperf_try_swap(prof);
