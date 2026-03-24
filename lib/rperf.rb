@@ -1,4 +1,4 @@
-require "rperf/version"
+require_relative "rperf/version"
 require "zlib"
 require "stringio"
 

@@ -80,7 +80,7 @@ USAGE = "Usage: rperf record [options] command [args...]\n" \
 # Handle top-level flags before subcommand parsing
 case ARGV.first
 when "-v", "--version"
-  require "rperf"
+  require_relative "../lib/rperf"
   puts "rperf #{Rperf::VERSION}"
   exit
 when "-h", "--help"
