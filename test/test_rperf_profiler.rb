@@ -257,4 +257,63 @@ class TestRperfProfiler < Test::Unit::TestCase
     assert_not_nil data
     assert_operator data[:aggregated_samples].size, :>, 0
   end
+
+  # --- verbose mode ---
+
+  def test_verbose_output
+    old_stderr = $stderr
+    $stderr = StringIO.new
+
+    Rperf.start(frequency: 500, verbose: true)
+    5_000_000.times { 1 + 1 }
+    Rperf.stop
+
+    output = $stderr.string
+    $stderr = old_stderr
+
+    assert_include output, "[rperf] mode="
+    assert_include output, "[rperf] sampling:"
+    assert_include output, "[rperf] samples recorded:"
+  end
+
+  def test_verbose_top_tables
+    old_stderr = $stderr
+    $stderr = StringIO.new
+
+    Rperf.start(frequency: 1000, verbose: true)
+    10_000_000.times { 1 + 1 }
+    Rperf.stop
+
+    output = $stderr.string
+    $stderr = old_stderr
+
+    assert_include output, "[rperf] top"
+    assert_include output, "by flat:"
+    assert_include output, "by cum:"
+  end
+
+  # --- wall mode ---
+
+  def test_wall_mode_basic
+    data = Rperf.start(frequency: 500, mode: :wall) do
+      5_000_000.times { 1 + 1 }
+    end
+    assert_not_nil data
+    assert_operator data[:aggregated_samples].size, :>, 0
+    assert_valid_samples(data[:aggregated_samples])
+  end
+
+  def test_wall_mode_sleep_weight
+    data = Rperf.start(frequency: 500, mode: :wall, aggregate: false) do
+      sleep 0.1
+    end
+    assert_not_nil data
+    samples = data[:raw_samples]
+    assert_operator samples.size, :>, 0
+
+    total_weight = samples.sum { |_, w| w }
+    # Wall mode with 100ms sleep should have at least ~50ms total weight
+    assert_operator total_weight, :>, 50_000_000,
+      "Wall mode total weight (#{total_weight}ns) should reflect sleep time"
+  end
 end
