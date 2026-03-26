@@ -1,5 +1,6 @@
 title: "rperf guide"
 author: "rperf project"
+repository: "https://github.com/ko1/rperf"
 language: "en"
 ai_generated: true
 output_dir: ../manual
