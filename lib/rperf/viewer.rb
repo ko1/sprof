@@ -81,6 +81,44 @@ class Rperf::Viewer
     end
   end
 
+  # Generate a self-contained static HTML file with inline snapshot data.
+  # The HTML loads d3/d3-flamegraph from CDN but requires no server.
+  def self.render_static_html(data)
+    samples = data[:aggregated_samples] || []
+    label_sets = data[:label_sets] || []
+
+    json_snapshot = JSON.generate({
+      id: 1,
+      taken_at: Time.now.iso8601,
+      mode: data[:mode],
+      frequency: data[:frequency],
+      duration_ns: data[:duration_ns],
+      sampling_count: data[:sampling_count],
+      samples: samples.map { |frames, weight, thread_seq, label_set_id|
+        {
+          stack: frames.reverse.map { |_, label| label },
+          weight: weight,
+          thread_seq: thread_seq || 0,
+          label_set_id: label_set_id || 0,
+        }
+      },
+      label_sets: label_sets.map { |ls| ls.is_a?(Hash) ? ls.transform_keys(&:to_s) : ls },
+    })
+
+    logo = LOGO_SVG.sub("<svg ", '<svg style="height:36px;width:auto" ')
+
+    html = VIEWER_HTML.sub("<!-- LOGO -->") { logo }
+
+    # Hide snapshot selector (single snapshot, no server)
+    html = html.sub('<select id="sel-snapshot"', '<select id="sel-snapshot" style="display:none"')
+
+    # Replace dynamic loading with inline data
+    html = html.sub("loadSnapshotList();",
+      "currentData = #{json_snapshot}; updateTagDropdowns(); applyAndRender();")
+
+    html
+  end
+
   private
 
   LOGO_SVG = begin

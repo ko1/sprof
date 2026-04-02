@@ -23,6 +23,12 @@ def run_pprof_subcommand(name, banner, min_files:)
       mode = :text
     end
 
+    if min_files == 1
+      opts.on("--html", "Output static HTML viewer to stdout") do
+        mode = :html
+      end
+    end
+
     opts.on("-h", "--help", "Show this help") do
       puts opts
       exit
@@ -113,6 +119,9 @@ when "report"
         exit
       when :text
         $stdout.puts Rperf::Text.encode(data)
+        exit
+      when :html
+        $stdout.puts Rperf::Viewer.render_static_html(data)
         exit
       end
 
