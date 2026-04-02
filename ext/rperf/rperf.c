@@ -1702,6 +1702,14 @@ rperf_after_fork_child(void)
     /* Mark as not running — timer doesn't exist in child */
     g_profiler.running = 0;
 
+    /* Re-initialize mutex/condvar — they may have been locked by the parent's
+     * worker thread at fork time and are in an undefined state in the child.
+     * POSIX says only async-signal-safe functions should be called in atfork
+     * child handlers, but pthread_mutex_init is safe on Linux/glibc/musl and
+     * this is the standard pattern (e.g., Python, Go do the same). */
+    pthread_mutex_init(&g_profiler.worker_mutex, NULL);
+    pthread_cond_init(&g_profiler.worker_cond, NULL);
+
 #if RPERF_USE_TIMER_SIGNAL
     /* timer_create timers are not inherited across fork, but pending signals may be.
      * Block the signal, drain any pending instances, then restore old handler. */
