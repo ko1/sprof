@@ -1,10 +1,10 @@
 # Framework Integration
 
-rperf provides optional integrations that automatically profile and label samples with context from web frameworks and job processors. They use [`Rperf.profile`](#index:Rperf.profile), which both activates the timer and sets labels. This works seamlessly with `start(defer: true)` — only requests/jobs that pass through the middleware are sampled. Start profiling separately (e.g., in an initializer).
+rperf provides optional integrations that automatically profile and label samples with context from web frameworks and job processors. They use [`Rperf.profile`](#index:Rperf.profile), which both activates the timer and sets labels. This works seamlessly with `start(defer: true)` — the timer only fires while at least one `profile` block is active. Note that the timer is process-wide: while any thread's `profile` block is active, all threads are sampled (each thread's samples carry its own labels, so they remain distinguishable). Start profiling separately (e.g., in an initializer).
 
 ## Rack middleware
 
-`Rperf::RackMiddleware` profiles each request and labels it with its endpoint (`METHOD /path`).
+`Rperf::RackMiddleware` profiles each request and labels it with its endpoint (`METHOD /path`). By default, dynamic segments are normalized (numeric IDs → `:id`, UUIDs → `:uuid`) to keep label cardinality low. Use `label: :raw` for the original PATH_INFO, or pass a custom `label:` proc for framework-specific route normalization.
 
 ```ruby
 require "rperf/rack"
@@ -237,7 +237,7 @@ class UsersController < ApplicationController
 end
 ```
 
-Only the `profile` blocks are sampled — other requests and background work have zero timer overhead.
+While any `profile` block is active, the process-wide timer fires and all threads are sampled. When no `profile` block is running, the timer is paused and overhead is zero. Each thread's samples carry its own labels, so `profile`-wrapped code is distinguishable from background work.
 
 ## Full Rails example
 

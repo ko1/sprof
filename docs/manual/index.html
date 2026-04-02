@@ -1989,7 +1989,7 @@ Run 'rperf help' for full documentation
   </tbody>
 </table>
 
-<p>On Linux, rperf uses <code>timer_create</code> with <code>SIGEV_SIGNAL</code> and a <code>sigaction</code> handler by default. This provides precise interval timing with no extra thread. The signal number defaults to <code>SIGRTMIN+8</code> and can be changed via the <code>signal:</code> keyword argument to <code>Rperf.start</code> in the Ruby API.</p>
+<p>On Linux, rperf uses <code>timer_create</code> with <code>SIGEV_THREAD_ID</code> to deliver timer signals to a dedicated worker thread by default. This provides precise interval timing without interrupting Ruby threads. The signal number defaults to <code>SIGRTMIN+8</code> and can be changed via the <code>signal:</code> keyword argument to <code>Rperf.start</code> in the Ruby API.</p>
 
 <p>On macOS (and when <code>signal: false</code> is set on Linux), rperf falls back to a dedicated pthread with a <code>nanosleep</code> loop.</p>
 
@@ -2776,6 +2776,11 @@ go tool pprof <span class="nt">-tagignore</span><span class="o">=</span><span cl
 
 <p><span id="en--04-library-usage--idx-10"><code>Rperf.profile</code></span> activates the timer for the duration of the block and optionally applies labels. It combines timer control with label assignment in a single call.</p>
 
+<div class="admonition admonition-note">
+<p class="admonition-title">Note</p>
+<p>The timer is <strong>process-wide</strong>. While any thread’s <code>profile</code> block is active, <strong>all threads</strong> are sampled — not just the thread that called <code>profile</code>. Each thread’s samples carry its own labels, so they are distinguishable. When the last active <code>profile</code> block exits (refcount reaches 0), the timer is paused and all threads stop being sampled.</p>
+</div>
+
 <div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">require</span> <span class="s2">"rperf"</span>
 
 <span class="no">Rperf</span><span class="p">.</span><span class="nf">start</span><span class="p">(</span><span class="ss">defer: </span><span class="kp">true</span><span class="p">,</span> <span class="ss">mode: :wall</span><span class="p">)</span>
@@ -3409,11 +3414,11 @@ Samples: 509, Frequency: 1000Hz
   <section class="chapter" id="chapter-en--07-framework-integration" data-lang="en" style="display: none;">
     <h1 id="en--07-framework-integration--framework-integration">7. Framework Integration</h1>
 
-<p>rperf provides optional integrations that automatically profile and label samples with context from web frameworks and job processors. They use <span id="en--07-framework-integration--idx-0"><code>Rperf.profile</code></span>, which both activates the timer and sets labels. This works seamlessly with <code>start(defer: true)</code> — only requests/jobs that pass through the middleware are sampled. Start profiling separately (e.g., in an initializer).</p>
+<p>rperf provides optional integrations that automatically profile and label samples with context from web frameworks and job processors. They use <span id="en--07-framework-integration--idx-0"><code>Rperf.profile</code></span>, which both activates the timer and sets labels. This works seamlessly with <code>start(defer: true)</code> — the timer only fires while at least one <code>profile</code> block is active. Note that the timer is process-wide: while any thread’s <code>profile</code> block is active, all threads are sampled (each thread’s samples carry its own labels, so they remain distinguishable). Start profiling separately (e.g., in an initializer).</p>
 
 <h2 id="en--07-framework-integration--rack-middleware">7.1 Rack middleware</h2>
 
-<p><code>Rperf::RackMiddleware</code> profiles each request and labels it with its endpoint (<code>METHOD /path</code>).</p>
+<p><code>Rperf::RackMiddleware</code> profiles each request and labels it with its endpoint (<code>METHOD /path</code>). By default, dynamic segments are normalized (numeric IDs → <code>:id</code>, UUIDs → <code>:uuid</code>) to keep label cardinality low. Use <code>label: :raw</code> for the original PATH_INFO, or pass a custom <code>label:</code> proc for framework-specific route normalization.</p>
 
 <div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">require</span> <span class="s2">"rperf/rack"</span>
 </code></pre></div></div>
@@ -3651,7 +3656,7 @@ go tool pprof <span class="nt">-tagroot</span><span class="o">=</span>job profil
 <span class="k">end</span>
 </code></pre></div></div>
 
-<p>Only the <code>profile</code> blocks are sampled — other requests and background work have zero timer overhead.</p>
+<p>While any <code>profile</code> block is active, the process-wide timer fires and all threads are sampled. When no <code>profile</code> block is running, the timer is paused and overhead is zero. Each thread’s samples carry its own labels, so <code>profile</code>-wrapped code is distinguishable from background work.</p>
 
 <h2 id="en--07-framework-integration--full-rails-example">7.6 Full Rails example</h2>
 
@@ -5136,7 +5141,7 @@ Run 'rperf help' for full documentation
   </tbody>
 </table>
 
-<p>Linux では、rperf はデフォルトで <code>timer_create</code> と <code>SIGEV_SIGNAL</code> を使い、<code>sigaction</code> ハンドラを使用します。これにより、追加スレッドなしで正確なインターバルタイミングが実現されます。シグナル番号はデフォルトで <code>SIGRTMIN+8</code> で、Ruby API の <code>Rperf.start</code> に対する <code>signal:</code> キーワード引数で変更できます。</p>
+<p>Linux では、rperf はデフォルトで <code>timer_create</code> と <code>SIGEV_THREAD_ID</code> を使い、専用のワーカースレッドにタイマーシグナルを送ります。これにより、Ruby スレッドを中断することなく正確なインターバルタイミングが実現されます。シグナル番号はデフォルトで <code>SIGRTMIN+8</code> で、Ruby API の <code>Rperf.start</code> に対する <code>signal:</code> キーワード引数で変更できます。</p>
 
 <p>macOS では（および Linux で <code>signal: false</code> を設定した場合）、rperf は <code>nanosleep</code> ループを持つ専用の pthread にフォールバックします。</p>
 
@@ -6551,7 +6556,12 @@ Samples: 509, Frequency: 1000Hz
   <section class="chapter" id="chapter-ja--07-framework-integration" data-lang="ja" style="display: none;">
     <h1 id="ja--07-framework-integration--フレームワーク統合">7. フレームワーク統合</h1>
 
-<p>rperf は、Web フレームワークやジョブプロセッサからのコンテキストで自動的にプロファイルおよびラベル付けするオプションの統合機能を提供します。これらは <span id="ja--07-framework-integration--idx-0"><code>Rperf.profile</code></span> を使用し、タイマーの有効化とラベルの設定を同時に行います。<code>start(defer: true)</code> とシームレスに連携し、ミドルウェアを通過するリクエスト/ジョブのみがサンプリングされます。プロファイリングの開始は別途行ってください（例: イニシャライザで）。</p>
+<p>rperf は、Web フレームワークやジョブプロセッサからのコンテキストで自動的にプロファイルおよびラベル付けするオプションの統合機能を提供します。これらは <span id="ja--07-framework-integration--idx-0"><code>Rperf.profile</code></span> を使用し、タイマーの有効化とラベルの設定を同時に行います。<code>start(defer: true)</code> とシームレスに連携します。プロファイリングの開始は別途行ってください（例: イニシャライザで）。</p>
+
+<div class="admonition admonition-note">
+<p class="admonition-title">Note</p>
+<p><code>Rperf.profile</code> が有効化するタイマーはプロセス全体に作用します。あるスレッドの <code>profile</code> ブロック実行中、同時に動いている他のスレッドもサンプリングされます。各スレッドのサンプルにはそのスレッド自身のラベルが付くため、プロファイル上で区別できます。この設計により、プロファイル対象区間でのGVL競合やバックグラウンド処理の影響も可視化できます。</p>
+</div>
 
 <h2 id="ja--07-framework-integration--rack-ミドルウェア">7.1 Rack ミドルウェア</h2>
 
@@ -6666,7 +6676,12 @@ go tool pprof <span class="nt">-tagroot</span><span class="o">=</span>job profil
 
 <h2 id="ja--07-framework-integration--ブラウザ内ビューア">7.4 ブラウザ内ビューア</h2>
 
-<p><code>Rperf::Viewer</code> は、設定可能なマウントパスでインタラクティブなプロファイリング UI を提供する Rack ミドルウェアです。スナップショットをメモリに保持し、<a href="https://github.com/nicedoc/d3-flame-graph">d3-flame-graph</a> を使ってブラウザ内で描画します。gem の依存やビルドツールは不要です。ビューアは実行時に CDN から <a href="https://github.com/nicedoc/d3-flame-graph">d3-flame-graph</a> を読み込むため、初回アクセス時にインターネット接続が必要です。</p>
+<p><code>Rperf::Viewer</code> は、設定可能なマウントパスでインタラクティブなプロファイリング UI を提供する Rack ミドルウェアです。スナップショットをメモリに保持し、<a href="https://github.com/nicedoc/d3-flame-graph">d3-flame-graph</a> を使ってブラウザ内で描画します。gem の依存やビルドツールは不要です。ビューアは実行時に CDN（cdnjs.cloudflare.com, cdn.jsdelivr.net）から d3.js と d3-flame-graph を読み込むため、初回アクセス時にインターネット接続が必要です。</p>
+
+<div class="admonition admonition-warning">
+<p class="admonition-title">Warning</p>
+<p><code>Rperf::Viewer</code> には組み込みの認証機能がなく、スタックトレースやラベル値を含むプロファイリングデータがエンドポイントにアクセスできる全員に公開されます。本番環境では必ずフレームワークの認証でアクセスを制限してください（下記「アクセス制御」参照）。</p>
+</div>
 
 <div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">require</span> <span class="s2">"rperf/viewer"</span>
 </code></pre></div></div>
@@ -6793,7 +6808,7 @@ go tool pprof <span class="nt">-tagroot</span><span class="o">=</span>job profil
 <span class="k">end</span>
 </code></pre></div></div>
 
-<p><code>profile</code> ブロックのみがサンプリングされます。他のリクエストやバックグラウンド処理にはタイマーのオーバーヘッドがゼロです。</p>
+<p><code>profile</code> ブロックの外ではタイマーが停止し、オーバーヘッドはゼロです。<code>profile</code> ブロック内では、プロセス全体のスレッドがサンプリング対象になります（各スレッドのサンプルにはそのスレッド自身のラベルが付きます）。</p>
 
 <h2 id="ja--07-framework-integration--rails-の完全な設定例">7.6 Rails の完全な設定例</h2>
 

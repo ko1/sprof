@@ -4,16 +4,11 @@ class Rperf::RackMiddleware
   # Options:
   #   label_key: - Symbol key for the endpoint label (default: :endpoint)
   #   label:     - Proc(env) -> String to customize the label value.
-  #               Default: "METHOD /path" from REQUEST_METHOD and PATH_INFO.
-  #
-  # Note: The default uses PATH_INFO as-is. If your routes contain dynamic
-  # segments (e.g. /users/:id), each unique path creates a separate label set
-  # that persists in memory for the profiling session. In production with high-
-  # cardinality paths, provide a custom label proc that normalizes IDs:
-  #
-  #   use Rperf::RackMiddleware, label: ->(env) {
-  #     "#{env["REQUEST_METHOD"]} #{env["PATH_INFO"].gsub(%r{/\d+}, '/:id')}"
-  #   }
+  #               Default: "METHOD /path" with dynamic segments normalized
+  #               (numeric IDs → :id, UUIDs → :uuid) to keep label cardinality low.
+  #               Set label: :raw to use PATH_INFO as-is (not recommended for
+  #               routes with dynamic segments — each unique path persists in
+  #               memory for the profiling session).
   #
   def initialize(app, label_key: :endpoint, label: nil)
     @app = app
@@ -21,11 +16,19 @@ class Rperf::RackMiddleware
     @label_proc = label
   end
 
+  UUID_RE = %r{/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}}i
+  NUMERIC_RE = %r{/\d+}
+
   def call(env)
-    endpoint = if @label_proc
+    endpoint = if @label_proc == :raw
+      "#{env["REQUEST_METHOD"]} #{env["PATH_INFO"]}"
+    elsif @label_proc
       @label_proc.call(env)
     else
-      "#{env["REQUEST_METHOD"]} #{env["PATH_INFO"]}"
+      path = env["PATH_INFO"]
+        .gsub(UUID_RE, "/:uuid")
+        .gsub(NUMERIC_RE, "/:id")
+      "#{env["REQUEST_METHOD"]} #{path}"
     end
     Rperf.profile(@label_key => endpoint) do
       @app.call(env)

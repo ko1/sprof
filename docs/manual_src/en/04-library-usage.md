@@ -268,6 +268,9 @@ This is especially useful with [framework integrations](#index:Framework Integra
 
 [`Rperf.profile`](#index:Rperf.profile) activates the timer for the duration of the block and optionally applies labels. It combines timer control with label assignment in a single call.
 
+> [!NOTE]
+> The timer is **process-wide**. While any thread's `profile` block is active, **all threads** are sampled — not just the thread that called `profile`. Each thread's samples carry its own labels, so they are distinguishable. When the last active `profile` block exits (refcount reaches 0), the timer is paused and all threads stop being sampled.
+
 ```ruby
 require "rperf"
 

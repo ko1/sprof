@@ -106,6 +106,8 @@ run MyApp
 Thread.new { loop { sleep 3600; Rperf::Viewer.instance&.take_snapshot! } }
 ```
 
+> **Note:** `Rperf::Viewer` has no built-in authentication. In production, restrict access with your framework's auth mechanisms (e.g., route constraints in Rails). See the [manual](https://ko1.github.io/rperf/) for examples.
+
 ### Environment Variables
 
 Profile without code changes (e.g., Rails):
