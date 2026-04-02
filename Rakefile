@@ -7,12 +7,14 @@ task :release do
   tag = "v#{Rperf::VERSION}"
 
   if system("git", "rev-parse", tag, err: File::NULL, out: File::NULL)
-    abort "Tag #{tag} already exists"
+    # Tag already exists — we're likely running inside CI (triggered by tag push).
+    # Skip tagging/pushing; let rubygems/release-gem handle gem build+publish.
+    puts "Tag #{tag} already exists — skipping tag/push (CI mode)"
+  else
+    sh "git", "tag", tag
+    sh "git", "push", "origin", "master", "--tags"
+    puts "Pushed #{tag} — GitHub Actions will publish the gem"
   end
-
-  sh "git", "tag", tag
-  sh "git", "push", "origin", "master", "--tags"
-  puts "Pushed #{tag} — GitHub Actions will publish the gem"
 end
 require "rake/extensiontask"
 require "rake/testtask"
