@@ -39,10 +39,7 @@ Time the thread spent off the GVL — during I/O operations, `sleep`, or C exten
 
 High `%GVL: blocked` time indicates your program is I/O bound. Look at the cumulative view to find which functions are triggering the I/O.
 
-```bash
-# Filter to GVL-blocked samples only
-go tool pprof -tagfocus=%GVL=blocked profile.pb.gz
-```
+In the viewer, use tagfocus with `blocked` to isolate these samples, or tagroot with `%GVL` to group by GVL state.
 
 ### %GVL: wait
 
@@ -52,10 +49,7 @@ Time the thread spent waiting to reacquire the GVL after becoming ready. This in
 
 High `%GVL: wait` time means your threads are serialized on the GVL. Consider reducing GVL-holding work, using Ractors, or moving work to child processes.
 
-```bash
-# Filter to GVL-wait samples only
-go tool pprof -tagfocus=%GVL=wait profile.pb.gz
-```
+In the viewer, use tagfocus with `wait` to isolate these samples.
 
 ### %GC: mark
 
@@ -73,21 +67,15 @@ Time spent in the GC sweeping phase. Always measured in wall time. Attributed to
 
 High `%GC: sweep` time means too many short-lived objects. Consider reusing objects or using object pools.
 
-### Filtering VM state labels in pprof
+### Filtering VM state labels
 
-```bash
-# Show only GVL-blocked time
-go tool pprof -tagfocus=%GVL=blocked profile.pb.gz
+In the rperf viewer or `Rperf::Viewer`:
 
-# Show only GC time (both marking and sweeping)
-go tool pprof -tagfocus=%GC profile.pb.gz
+- **tagfocus**: Enter `blocked`, `wait`, `mark`, or `sweep` to isolate specific VM states
+- **tagignore**: Check `%GVL: blocked` to exclude off-GVL samples
+- **tagroot**: Check `%GVL` or `%GC` to group the flamegraph by VM state
 
-# Group by GVL state at flame graph root
-go tool pprof -tagroot=%GVL profile.pb.gz
-
-# Exclude GVL-blocked samples
-go tool pprof -tagignore=%GVL=blocked profile.pb.gz
-```
+When using pprof format, `go tool pprof -tagfocus=%GVL=blocked profile.pb.gz` and similar flags provide equivalent filtering.
 
 ## Diagnosing common problems
 

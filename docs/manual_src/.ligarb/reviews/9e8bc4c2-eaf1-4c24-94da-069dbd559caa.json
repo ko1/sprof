@@ -1,0 +1,29 @@
+{
+  "id": "9e8bc4c2-eaf1-4c24-94da-069dbd559caa",
+  "status": "applied",
+  "created_at": "2026-03-21T04:37:51Z",
+  "context": {
+    "chapter_slug": "part1",
+    "heading_id": "part1--getting-started",
+    "selected_text": "Getting Started",
+    "source_file": "/home/ko1/app/rperf/docs/manual_src/part1.md"
+  },
+  "messages": [
+    {
+      "role": "user",
+      "content": "Part ファイルに説明がないページなのが気になります。",
+      "timestamp": "2026-03-21T04:37:51Z"
+    },
+    {
+      "role": "assistant",
+      "content": "おっしゃる通りです。Part ファイル（`part1.md`, `part2.md`, `part3.md`）はすべて h1 見出しのみで、導入テキストがありません。ligarb の仕様では Part の本文は開始テキストとして表示されるので、各パートに簡単な説明を追加するのが良いですね。\n\n以下のパッチで3つの Part ファイルに説明文を追加します。\n\n<patch file=\"part1.md\">\n<<<\n# Getting Started\n===\n# Getting Started\n\nThis part covers what rperf is, why it exists, and how to install it on your system.\n>>>\n</patch>\n\n<patch file=\"part2.md\">\n<<<\n# How to Use\n===\n# How to Use\n\nThis part explains how to profile Ruby programs with rperf — from the command line and as a library — and describes the available output formats.\n>>>\n</patch>\n\n<patch file=\"part3.md\">\n<<<\n# Deep Dive\n===\n# Deep Dive\n\nThis part explores how to read and act on profiling results, and explains how rperf works under the hood.\n>>>\n</patch>",
+      "timestamp": "2026-03-21T04:38:12Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Applied 3/3 patch(es) and rebuilt.",
+      "timestamp": "2026-03-21T04:38:24Z"
+    }
+  ],
+  "file_path": "/home/ko1/app/rperf/docs/manual_src/.ligarb/reviews/9e8bc4c2-eaf1-4c24-94da-069dbd559caa.json"
+}

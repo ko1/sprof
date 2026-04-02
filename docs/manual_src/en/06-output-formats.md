@@ -67,22 +67,16 @@ View comments with: `go tool pprof -comments profile.pb.gz`
 
 Each sample carries a `thread_seq` numeric label — a thread sequence number (1-based) assigned when rperf first sees each thread during a profiling session. When [`Rperf.label`](#index:Rperf.label) is used, custom key-value string labels are also attached to samples.
 
+These labels can be filtered with `go tool pprof`:
+
 ```bash
-# Group flame graph by thread
-go tool pprof -tagroot=thread_seq profile.pb.gz
-
-# Filter by custom label
-go tool pprof -tagfocus=request=abc-123 profile.pb.gz
-
-# Group by label at root ("which requests are slow?")
-go tool pprof -tagroot=request profile.pb.gz
-
-# Group by label at leaf ("who calls this function?")
-go tool pprof -tagleaf=request profile.pb.gz
-
-# Exclude by label
-go tool pprof -tagignore=request=healthcheck profile.pb.gz
+go tool pprof -tagroot=thread_seq profile.pb.gz     # group by thread
+go tool pprof -tagfocus=request=abc-123 profile.pb.gz  # filter by label
+go tool pprof -tagroot=request profile.pb.gz         # group by label
 ```
+
+> [!NOTE]
+> The rperf viewer (JSON format) supports the same tag operations — tagfocus, tagignore, tagroot, tagleaf — without requiring Go. See [In-browser viewer](#index:Rperf::Viewer) for details.
 
 ## Collapsed stacks
 

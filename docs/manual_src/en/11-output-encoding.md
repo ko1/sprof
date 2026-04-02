@@ -48,7 +48,7 @@ Every sample carries a `thread_seq` numeric label — a 1-based thread sequence 
 
 2. **C side**: Each `rperf_thread_data_t` stores a `label_set_id` (integer). When a sample is recorded, the current thread's `label_set_id` is copied into the sample — a single integer, adding zero allocation overhead to the hot path. The aggregation table includes `label_set_id` in its hash key, so identical stacks with different labels remain separate entries.
 
-3. **Encoding**: At encode time, the Ruby PProf encoder reads the `label_sets` array and writes each label as a pprof `Sample.Label` (key-value string pair). `go tool pprof -tagfocus` and `-tagroot` can filter and group by label.
+3. **Encoding**: At encode time, encoders read the `label_sets` array. The JSON encoder preserves labels as-is; the PProf encoder writes each label as a pprof `Sample.Label` (key-value string pair). The rperf viewer's tagfocus, tagroot, tagleaf, and tagignore controls can filter and group by label in both formats.
 
 ## Collapsed stacks encoder
 

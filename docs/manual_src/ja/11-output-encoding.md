@@ -48,7 +48,7 @@ rperf は [pprof](#cite:ren2010) protobuf 形式を protobuf gem に依存せず
 
 2. **C 側**: 各 `rperf_thread_data_t` は `label_set_id`（整数）を格納します。サンプルが記録されるとき、現在のスレッドの `label_set_id` がサンプルにコピーされます。単一の整数であり、ホットパスにアロケーションオーバーヘッドがゼロです。集約テーブルはハッシュキーに `label_set_id` を含むため、同一スタックで異なるラベルのサンプルは別エントリとして維持されます。
 
-3. **エンコーディング**: エンコード時に、Ruby の PProf エンコーダーが `label_sets` 配列を読み、各ラベルを pprof の `Sample.Label`（キーバリュー文字列ペア）として書き込みます。`go tool pprof -tagfocus` と `-tagroot` でラベルによるフィルタリングとグループ化が可能です。
+3. **エンコーディング**: エンコード時に、エンコーダーが `label_sets` 配列を読みます。JSON エンコーダーはラベルをそのまま保持し、PProf エンコーダーは各ラベルを pprof の `Sample.Label`（キーバリュー文字列ペア）として書き込みます。rperf ビューアの tagfocus、tagroot、tagleaf、tagignore コントロールで、どちらの形式でもラベルによるフィルタリングとグループ化が可能です。
 
 ## Collapsed stacks エンコーダー
 

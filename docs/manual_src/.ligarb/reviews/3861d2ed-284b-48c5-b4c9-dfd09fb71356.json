@@ -1,0 +1,29 @@
+{
+  "id": "3861d2ed-284b-48c5-b4c9-dfd09fb71356",
+  "status": "applied",
+  "created_at": "2026-03-21T03:02:02Z",
+  "context": {
+    "chapter_slug": "cover",
+    "heading_id": "cover--rperf-guide",
+    "selected_text": "rperf guide",
+    "source_file": "/home/ko1/app/rperf/docs/manual_src/cover.md"
+  },
+  "messages": [
+    {
+      "role": "user",
+      "content": "../logo.svg をカバーに置いといてくれますか",
+      "timestamp": "2026-03-21T03:02:02Z"
+    },
+    {
+      "role": "assistant",
+      "content": "ロゴをコピーしました。カバーに画像を追加するパッチです：\n\n<patch file=\"cover.md\">\n<<<\n# rperf guide\n\nA safepoint-based sampling performance profiler for Ruby.\n===\n# rperf guide\n\n![rperf logo](images/logo.svg)\n\nA safepoint-based sampling performance profiler for Ruby.\n>>>\n</patch>",
+      "timestamp": "2026-03-21T03:02:26Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Applied 1/1 patch(es) and rebuilt.",
+      "timestamp": "2026-03-21T03:02:35Z"
+    }
+  ],
+  "file_path": "/home/ko1/app/rperf/docs/manual_src/.ligarb/reviews/3861d2ed-284b-48c5-b4c9-dfd09fb71356.json"
+}

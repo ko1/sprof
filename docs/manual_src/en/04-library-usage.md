@@ -11,7 +11,7 @@ The simplest way to use rperf is with the block form of [`Rperf.start`](#index:R
 ```ruby
 require "rperf"
 
-data = Rperf.start(output: "profile.pb.gz", frequency: 1000, mode: :cpu) do
+data = Rperf.start(output: "profile.json.gz", frequency: 1000, mode: :cpu) do
   # code to profile
 end
 ```
@@ -128,6 +128,7 @@ When `aggregate: true` (default), identical stacks are merged and their weights 
 [`Rperf.save`](#index:Rperf.save) writes profiling data to a file in any supported format:
 
 ```ruby
+Rperf.save("profile.json.gz", data)      # JSON format (default)
 Rperf.save("profile.pb.gz", data)        # pprof format
 Rperf.save("profile.collapsed", data)    # collapsed stacks
 Rperf.save("profile.txt", data)          # text report
@@ -147,7 +148,7 @@ Rperf.save("output.dat", data, format: :text)
 Rperf.start(frequency: 1000)
 # ... work ...
 snap = Rperf.snapshot
-Rperf.save("snap.pb.gz", snap)
+Rperf.save("snap.json.gz", snap)
 # ... more work (profiling continues) ...
 data = Rperf.stop
 ```
@@ -213,23 +214,16 @@ end
 Rperf.labels      #=> {}
 ```
 
-### Filtering by label in pprof
+### Filtering by label
 
-Labels are written into pprof sample labels. Use `go tool pprof` to filter:
+Labels are preserved in all output formats. The rperf viewer (`rperf report`) and `Rperf::Viewer` provide interactive filtering:
 
-```bash
-# Filter to specific label value
-go tool pprof -tagfocus=request=abc-123 profile.pb.gz
+- **tagfocus**: Enter a regex to keep only samples matching a label value (e.g., `abc-123`)
+- **tagroot**: Prepend a label key as a root frame to group the flamegraph (e.g., by `request`)
+- **tagleaf**: Append a label key as a leaf frame
+- **tagignore**: Exclude samples matching specific label values
 
-# Group by label at stack root ("which requests are slow?")
-go tool pprof -tagroot=request profile.pb.gz
-
-# Group by label at stack leaf ("who calls this function?")
-go tool pprof -tagleaf=request profile.pb.gz
-
-# Exclude specific label value
-go tool pprof -tagignore=request=healthcheck profile.pb.gz
-```
+When using pprof format, `go tool pprof -tagfocus`, `-tagroot`, `-tagleaf`, and `-tagignore` provide equivalent functionality.
 
 ### Reading labels
 
@@ -287,7 +281,7 @@ Rperf.profile(endpoint: "/health") do
 end
 
 data = Rperf.stop
-Rperf.save("profile.pb.gz", data)
+Rperf.save("profile.json.gz", data)
 ```
 
 ### Nesting

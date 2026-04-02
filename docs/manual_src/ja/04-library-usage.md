@@ -11,7 +11,7 @@ rperf を使用する最もシンプルな方法は、[`Rperf.start`](#index:Rpe
 ```ruby
 require "rperf"
 
-data = Rperf.start(output: "profile.pb.gz", frequency: 1000, mode: :cpu) do
+data = Rperf.start(output: "profile.json.gz", frequency: 1000, mode: :cpu) do
   # プロファイルしたいコード
 end
 ```
@@ -132,6 +132,7 @@ GVL/GC の状態は `label_sets` にラベルとして格納されます。C 拡
 [`Rperf.save`](#index:Rperf.save) はプロファイリングデータをサポートされている任意の形式でファイルに書き込みます:
 
 ```ruby
+Rperf.save("profile.json.gz", data)      # JSON 形式（デフォルト）
 Rperf.save("profile.pb.gz", data)        # pprof 形式
 Rperf.save("profile.collapsed", data)    # collapsed stacks
 Rperf.save("profile.txt", data)          # テキストレポート
@@ -151,7 +152,7 @@ Rperf.save("output.dat", data, format: :text)
 Rperf.start(frequency: 1000)
 # ... 処理 ...
 snap = Rperf.snapshot
-Rperf.save("snap.pb.gz", snap)
+Rperf.save("snap.json.gz", snap)
 # ... さらに処理（プロファイリングは継続） ...
 data = Rperf.stop
 ```
@@ -217,23 +218,16 @@ end
 Rperf.labels      #=> {}
 ```
 
-### pprof でのラベルによるフィルタリング
+### ラベルによるフィルタリング
 
-ラベルは pprof のサンプルラベルに書き込まれます。`go tool pprof` でフィルタリングできます:
+ラベルはすべての出力形式で保持されます。rperf ビューア（`rperf report`）や `Rperf::Viewer` でインタラクティブにフィルタリングできます:
 
-```bash
-# 特定のラベル値でフィルタ
-go tool pprof -tagfocus=request=abc-123 profile.pb.gz
+- **tagfocus**: ラベル値にマッチする正規表現を入力してサンプルを絞り込み（例: `abc-123`）
+- **tagroot**: ラベルキーをルートフレームとして追加しフレームグラフをグループ化（例: `request` ごと）
+- **tagleaf**: ラベルキーをリーフフレームとして追加
+- **tagignore**: 特定のラベル値に一致するサンプルを除外
 
-# スタックルートでラベルごとにグループ化（「どのリクエストが遅い？」）
-go tool pprof -tagroot=request profile.pb.gz
-
-# スタックリーフでラベルごとにグループ化（「この関数を呼んでいるのは誰？」）
-go tool pprof -tagleaf=request profile.pb.gz
-
-# 特定のラベル値を除外
-go tool pprof -tagignore=request=healthcheck profile.pb.gz
-```
+pprof 形式の場合、`go tool pprof -tagfocus`、`-tagroot`、`-tagleaf`、`-tagignore` で同等の操作が可能です。
 
 ### ラベルの読み取り
 
@@ -288,7 +282,7 @@ Rperf.profile(endpoint: "/health") do
 end
 
 data = Rperf.stop
-Rperf.save("profile.pb.gz", data)
+Rperf.save("profile.json.gz", data)
 ```
 
 ### ネスト

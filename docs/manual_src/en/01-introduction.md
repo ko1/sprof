@@ -13,6 +13,7 @@ rperf is inspired by Linux [perf](#cite:demelo2010), providing a familiar CLI in
 - **Accurate profiling**: Time-delta weighting corrects [safepoint bias](#index:safepoint bias), producing results closer to real time distribution than traditional count-based profilers.
 - **GVL / GC visibility**: In wall mode, tracks off-GVL blocking, GVL contention, and GC marking/sweeping as sample labels — no separate tool needed.
 - **Standard output formats**: Outputs [JSON](#index:JSON) (rperf native, default), [pprof](#index:pprof) protobuf (compatible with `go tool pprof`), [collapsed stacks](#index:collapsed stacks) (for flame graphs / speedscope), and human-readable text.
+- **Built-in viewer**: Includes an in-browser flamegraph viewer ([`Rperf::Viewer`](#index:Rperf::Viewer)) with tag filtering — no external tools required.
 - **Low overhead**: Default 1000 Hz sampling callback cost is < 0.2%, suitable for production.
 - **Simple CLI**: `rperf stat` for a quick overview, `rperf record` + `rperf report` for detailed analysis.
 
