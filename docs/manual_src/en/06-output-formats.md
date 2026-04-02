@@ -1,31 +1,10 @@
 # Output Formats
 
-rperf supports five output formats. The format is auto-detected from the file extension, or can be set explicitly with the `--format` flag (CLI) or `format:` parameter (API).
+rperf supports four output formats. The format is auto-detected from the file extension, or can be set explicitly with the `--format` flag (CLI) or `format:` parameter (API).
 
-## marshal (default)
+## JSON (default)
 
-The [marshal](#index:marshal) format is a gzip-compressed Ruby Marshal dump. This is rperf's native format and the default output.
-
-**Extension convention**: `.marshal.gz`
-
-**How to view**:
-
-```bash
-# Open rperf viewer (no external tools required)
-rperf report profile.marshal.gz
-```
-
-**How to load in Ruby**:
-
-```ruby
-data = Rperf.load("profile.marshal.gz")
-```
-
-**Advantages**: Native rperf format, no external tools required to view. Can be loaded back into Ruby for programmatic analysis.
-
-## JSON
-
-The JSON format is a gzip-compressed JSON representation of the profile data.
+The [JSON](#index:json) format is a gzip-compressed JSON representation of the profile data. This is rperf's native format and the default output.
 
 **Extension convention**: `.json.gz`
 
@@ -42,7 +21,7 @@ rperf report profile.json.gz
 data = Rperf.load("profile.json.gz")
 ```
 
-**Advantages**: Portable, human-inspectable format. Can be loaded back into Ruby or processed by any JSON-capable tool.
+**Advantages**: Native rperf format, no external tools required to view. Portable, human-inspectable format. Can be loaded back into Ruby or processed by any JSON-capable tool.
 
 ## pprof
 
@@ -180,25 +159,24 @@ Samples: 509, Frequency: 1000Hz
 
 ## Format comparison
 
-| Feature | marshal | json | pprof | collapsed | text |
-|---------|---------|------|-------|-----------|------|
-| File size | Small (binary + gzip) | Medium (json + gzip) | Small (binary + gzip) | Medium (text) | Small (text) |
-| Flame graph | Yes (via rperf viewer) | Yes (via rperf viewer) | Yes (via pprof web UI) | Yes (via flamegraph.pl) | No |
-| Call graph | No | No | Yes | No | No |
-| Diff comparison | No | No | Yes (`rperf diff`) | No | No |
-| No tools needed | Yes | Yes | No (requires Go) | No (requires flamegraph.pl) | Yes |
-| Load back into Ruby | Yes (`Rperf.load`) | Yes (`Rperf.load`) | No | No | No |
-| Programmatic parsing | Easy (Ruby Marshal) | Easy (JSON) | Complex (protobuf) | Simple | Simple |
-| AI-friendly | No | Yes | No | Yes | Yes |
+| Feature | json | pprof | collapsed | text |
+|---------|------|-------|-----------|------|
+| File size | Medium (json + gzip) | Small (binary + gzip) | Medium (text) | Small (text) |
+| Flame graph | Yes (via rperf viewer) | Yes (via pprof web UI) | Yes (via flamegraph.pl) | No |
+| Call graph | No | Yes | No | No |
+| Diff comparison | No | Yes (`rperf diff`) | No | No |
+| No tools needed | Yes | No (requires Go) | No (requires flamegraph.pl) | Yes |
+| Load back into Ruby | Yes (`Rperf.load`) | No | No | No |
+| Programmatic parsing | Easy (JSON) | Complex (protobuf) | Simple | Simple |
+| AI-friendly | Yes | No | Yes | Yes |
 
 ## Auto-detection rules
 
 | File extension | Format |
 |----------------|--------|
-| `.marshal.gz` | marshal (default) |
-| `.json.gz` | JSON |
+| `.json.gz` | JSON (default) |
 | `.pb.gz` | pprof |
 | `.collapsed` | Collapsed stacks |
 | `.txt` | Text report |
 
-The default output file (`rperf.marshal.gz`) uses marshal format.
+The default output file (`rperf.json.gz`) uses JSON format.

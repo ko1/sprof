@@ -129,7 +129,7 @@ rperf exec [options] command [args...]
 rperf record ruby my_app.rb
 ```
 
-デフォルトでは、CPU モードの marshal 形式で `rperf.marshal.gz` に保存します。
+デフォルトでは、CPU モードの JSON 形式で `rperf.json.gz` に保存します。
 
 ### 例: プロファイルの記録
 
@@ -137,7 +137,7 @@ rperf record ruby my_app.rb
 rperf record ruby fib.rb
 ```
 
-これにより `rperf.marshal.gz` が作成されます。その後 `rperf report` で分析したり、他の形式に変換したりできます。
+これにより `rperf.json.gz` が作成されます。その後 `rperf report` で分析したり、他の形式に変換したりできます。
 
 ### プロファイリングモードの選択
 
@@ -159,8 +159,8 @@ rperf record -m wall ruby my_app.rb
 rperf はファイル拡張子から形式を自動検出します:
 
 ```bash
-# marshal 形式 (デフォルト)
-rperf record -o profile.marshal.gz ruby my_app.rb
+# JSON 形式 (デフォルト)
+rperf record -o profile.json.gz ruby my_app.rb
 
 # pprof 形式
 rperf record -o profile.pb.gz ruby my_app.rb
@@ -254,23 +254,23 @@ rperf record [options] command [args...]
 
 | オプション | 説明 |
 |--------|-------------|
-| `-o PATH` | 出力ファイル (デフォルト: `rperf.marshal.gz`) |
+| `-o PATH` | 出力ファイル (デフォルト: `rperf.json.gz`) |
 | `-f HZ` | サンプリング周波数 (Hz) (デフォルト: 1000) |
 | `-m MODE` | `cpu` または `wall` (デフォルト: `cpu`) |
-| `--format FMT` | `marshal`、`json`、`pprof`、`collapsed`、または `text` (デフォルト: 拡張子から自動検出) |
+| `--format FMT` | `json`、`pprof`、`collapsed`、または `text` (デフォルト: 拡張子から自動検出) |
 | `-p, --print` | テキストプロファイルを stdout に出力 (`--format=text --output=/dev/stdout` と同等) |
 | `-v` | サンプリング統計を stderr に出力 |
 
 ## rperf report
 
-[`rperf report`](#index:rperf report) はプロファイルを分析用に開きます。marshal/json 形式のファイルには rperf の組み込みビューアを使用し（Go 不要）、pprof 形式 (`.pb.gz`) のファイルには `go tool pprof` を使用します（Go が必要）。
+[`rperf report`](#index:rperf report) はプロファイルを分析用に開きます。JSON 形式 (`.json.gz`) のファイルには rperf の組み込みビューアを使用し（Go 不要）、pprof 形式 (`.pb.gz`) のファイルには `go tool pprof` を使用します（Go が必要）。
 
 ```bash
 # インタラクティブな Web UI を開く (デフォルト)
 rperf report
 
 # 特定のファイルを開く
-rperf report profile.marshal.gz
+rperf report profile.json.gz
 
 # 上位の関数を出力
 rperf report --top
@@ -284,7 +284,7 @@ rperf report --text
 先ほど記録した `fib.rb` のプロファイルを使用:
 
 ```bash
-rperf report --top rperf.marshal.gz
+rperf report --top rperf.json.gz
 ```
 
 ```
@@ -295,7 +295,7 @@ Showing nodes accounting for 577.31ms, 100% of 577.31ms total
          0     0%   100%   577.31ms   100%  <main>
 ```
 
-デフォルト動作（`--top` や `--text` なし）では、フレームグラフ、上位関数ビュー、コールグラフの可視化を備えたインタラクティブな Web UI がブラウザで開きます。marshal/json 形式では rperf 組み込みビューア、pprof 形式では [pprof](#cite:ren2010) を利用します。
+デフォルト動作（`--top` や `--text` なし）では、フレームグラフ、上位関数ビュー、コールグラフの可視化を備えたインタラクティブな Web UI がブラウザで開きます。JSON 形式では rperf 組み込みビューア、pprof 形式では [pprof](#cite:ren2010) を利用します。
 
 ### report のオプション
 

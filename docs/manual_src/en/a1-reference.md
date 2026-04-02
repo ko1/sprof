@@ -12,7 +12,7 @@ rperf stat --report ruby my_app.rb
 # Full performance report (same as stat --report)
 rperf exec ruby my_app.rb
 
-# Record to default file (rperf.marshal.gz, marshal format, cpu mode)
+# Record to default file (rperf.json.gz, json format, cpu mode)
 rperf record ruby my_app.rb
 
 # Record with options
@@ -108,7 +108,7 @@ These are used internally by the CLI to configure the auto-started profiler:
 | `RPERF_OUTPUT` | path | Output file path |
 | `RPERF_FREQUENCY` | integer | Sampling frequency in Hz |
 | `RPERF_MODE` | `cpu`, `wall` | Profiling mode |
-| `RPERF_FORMAT` | `marshal`, `json`, `pprof`, `collapsed`, `text` | Output format |
+| `RPERF_FORMAT` | `json`, `pprof`, `collapsed`, `text` | Output format |
 | `RPERF_VERBOSE` | `1` | Print statistics to stderr |
 | `RPERF_STAT` | `1` | Enable stat mode output |
 | `RPERF_STAT_REPORT` | `1` | Include profile tables in stat output |
@@ -130,8 +130,7 @@ These are used internally by the CLI to configure the auto-started profiler:
 
 | Extension | Format | Tooling required |
 |-----------|--------|-----------------|
-| `.marshal.gz` (default) | marshal (rperf native) | None (`rperf report`) |
-| `.json.gz` | JSON | None (`rperf report`) |
+| `.json.gz` (default) | JSON (rperf native) | None (`rperf report`) |
 | `.pb.gz` | pprof protobuf | Go (`rperf report`) |
 | `.collapsed` | Collapsed stacks | flamegraph.pl or speedscope |
 | `.txt` | Text report | None |

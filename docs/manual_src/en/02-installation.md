@@ -58,4 +58,4 @@ On macOS (and when `signal: false` is set on Linux), rperf falls back to a dedic
 
 Go is only required for `rperf report` with pprof (`.pb.gz`) files and for the `rperf diff` subcommand, both of which wrap `go tool pprof`. If you need these features, install Go from [go.dev](https://go.dev/dl/).
 
-Without Go, you can still use all rperf features including `rperf report` with the default marshal (`.marshal.gz`) and JSON (`.json.gz`) formats, which open the built-in rperf viewer. You can also view pprof files with other tools like [speedscope](https://www.speedscope.app/) or generate text/collapsed output directly.
+Without Go, you can still use all rperf features including `rperf report` with the default JSON (`.json.gz`) format, which opens the built-in rperf viewer. You can also view pprof files with other tools like [speedscope](https://www.speedscope.app/) or generate text/collapsed output directly.

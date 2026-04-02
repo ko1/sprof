@@ -12,7 +12,7 @@ rperf stat --report ruby my_app.rb
 # 完全な性能レポート（stat --report と同等）
 rperf exec ruby my_app.rb
 
-# デフォルトファイルに記録（rperf.marshal.gz、marshal 形式、cpu モード）
+# デフォルトファイルに記録（rperf.json.gz、json 形式、cpu モード）
 rperf record ruby my_app.rb
 
 # オプション付きで記録
@@ -108,7 +108,7 @@ end
 | `RPERF_OUTPUT` | path | 出力ファイルパス |
 | `RPERF_FREQUENCY` | integer | サンプリング周波数 (Hz) |
 | `RPERF_MODE` | `cpu`, `wall` | プロファイリングモード |
-| `RPERF_FORMAT` | `marshal`, `json`, `pprof`, `collapsed`, `text` | 出力形式 |
+| `RPERF_FORMAT` | `json`, `pprof`, `collapsed`, `text` | 出力形式 |
 | `RPERF_VERBOSE` | `1` | 統計を stderr に出力 |
 | `RPERF_STAT` | `1` | stat モード出力を有効化 |
 | `RPERF_STAT_REPORT` | `1` | stat 出力にプロファイルテーブルを含める |
@@ -130,8 +130,7 @@ end
 
 | 拡張子 | 形式 | 必要なツール |
 |-----------|--------|-----------------|
-| `.marshal.gz` (デフォルト) | marshal (rperf 独自形式) | なし (`rperf report`) |
-| `.json.gz` | JSON | なし (`rperf report`) |
+| `.json.gz` (デフォルト) | JSON (rperf 独自形式) | なし (`rperf report`) |
 | `.pb.gz` | pprof protobuf | Go (`rperf report`) |
 | `.collapsed` | Collapsed stacks | flamegraph.pl or speedscope |
 | `.txt` | テキストレポート | なし |

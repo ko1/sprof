@@ -16,10 +16,10 @@ POSIX systems (Linux, macOS). Requires Ruby >= 3.4.0.
 
 ### record: Profile and save to file.
 
-    -o, --output PATH       Output file (default: rperf.marshal.gz)
+    -o, --output PATH       Output file (default: rperf.json.gz)
     -f, --frequency HZ      Sampling frequency in Hz (default: 1000)
     -m, --mode MODE         cpu or wall (default: cpu)
-    --format FORMAT         pprof, collapsed, or text (default: auto from extension)
+    --format FORMAT         json, pprof, collapsed, or text (default: auto from extension)
     -p, --print             Print text profile to stdout
                             (same as --format=text --output=/dev/stdout)
     --signal VALUE          Timer signal (Linux only): signal number, or 'false'
@@ -64,7 +64,7 @@ and flat/cumulative top-50 function tables.
     --text                  Print text report
 
 Default (no flag): opens interactive web UI in browser.
-Default file: rperf.marshal.gz
+Default file: rperf.json.gz
 
 ### diff: Compare two pprof profiles (target - base). Requires Go.
 
@@ -118,7 +118,7 @@ Rperf.save("profile.txt", data)
     mode:       :cpu or :wall (Symbol, default: :cpu)
     output:     File path to write on stop (String or nil)
     verbose:    Print statistics to stderr (true/false, default: false)
-    format:     :pprof, :collapsed, :text, or nil for auto-detect (Symbol or nil)
+    format:     :json, :pprof, :collapsed, :text, or nil for auto-detect (Symbol or nil)
     defer:      Start with timer paused; use Rperf.profile to activate (default: false)
 
 ### Rperf.stop return value
@@ -246,7 +246,7 @@ Returns the current thread's labels as a Hash. Empty hash if none set.
 
 ### Rperf.save(path, data, format: nil)
 
-Writes data to path. format: :pprof, :collapsed, or :text.
+Writes data to path. format: :json, :pprof, :collapsed, or :text.
 nil auto-detects from extension.
 
 ### Rperf::RackMiddleware (Rack)
@@ -375,23 +375,16 @@ Tag keys are sorted alphabetically (`%`-prefixed VM state keys appear first).
 
 ## OUTPUT FORMATS
 
-### marshal (default) — rperf native format
+### json (default) — rperf native format
 
-Gzip-compressed Ruby Marshal dump of the internal data hash
+Gzip-compressed JSON representation of the internal data hash
 (the same hash returned by `Rperf.stop` / `Rperf.snapshot` — see
 "Return value" above for the full structure).
 Preserves all data including labels, VM state, thread info, and statistics.
-Extension convention: `.marshal.gz`
-View with: `rperf report` (opens rperf viewer in browser, no Go required).
-Load programmatically: `data = Rperf.load("rperf.marshal.gz")`
-
-### json — rperf native format (JSON)
-
-Gzip-compressed JSON representation of the same internal data hash.
-Same data as marshal, but readable by non-Ruby tools (Python, jq, etc.).
+Readable by non-Ruby tools (Python, jq, etc.).
 Extension convention: `.json.gz`
 View with: `rperf report` (opens rperf viewer in browser, no Go required).
-Load programmatically: `data = Rperf.load("profile.json.gz")`
+Load programmatically: `data = Rperf.load("rperf.json.gz")`
 
 ### pprof
 
@@ -454,7 +447,7 @@ Example output:
 
 Format is auto-detected from the output file extension:
 
-    .marshal.gz → marshal (rperf native, default)
+    .json.gz    → json (rperf native, default)
     .json.gz    → json (rperf native, JSON)
     .pb.gz      → pprof
     .collapsed  → collapsed
@@ -572,7 +565,7 @@ Used internally by the CLI to pass options to the auto-started profiler:
     RPERF_OUTPUT=path     Output file path
     RPERF_FREQUENCY=hz    Sampling frequency
     RPERF_MODE=cpu|wall   Profiling mode
-    RPERF_FORMAT=fmt      pprof, collapsed, or text
+    RPERF_FORMAT=fmt      json, pprof, collapsed, or text
     RPERF_VERBOSE=1       Print statistics
     RPERF_SIGNAL=N|false  Timer signal number or 'false' for nanosleep (Linux only)
     RPERF_STAT=1          Enable stat mode (used by rperf stat)

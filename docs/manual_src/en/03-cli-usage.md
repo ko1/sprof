@@ -129,7 +129,7 @@ rperf exec [options] command [args...]
 rperf record ruby my_app.rb
 ```
 
-By default, it saves to `rperf.marshal.gz` in marshal format with CPU mode.
+By default, it saves to `rperf.json.gz` in JSON format with CPU mode.
 
 ### Example: Recording a profile
 
@@ -137,7 +137,7 @@ By default, it saves to `rperf.marshal.gz` in marshal format with CPU mode.
 rperf record ruby fib.rb
 ```
 
-This creates `rperf.marshal.gz`. You can then analyze it with `rperf report` or convert to other formats.
+This creates `rperf.json.gz`. You can then analyze it with `rperf report` or convert to other formats.
 
 ### Choosing a profiling mode
 
@@ -159,8 +159,8 @@ rperf record -m wall ruby my_app.rb
 rperf auto-detects the format from the file extension:
 
 ```bash
-# marshal format (default)
-rperf record -o profile.marshal.gz ruby my_app.rb
+# JSON format (default)
+rperf record -o profile.json.gz ruby my_app.rb
 
 # pprof format
 rperf record -o profile.pb.gz ruby my_app.rb
@@ -254,23 +254,23 @@ rperf record [options] command [args...]
 
 | Option | Description |
 |--------|-------------|
-| `-o PATH` | Output file (default: `rperf.marshal.gz`) |
+| `-o PATH` | Output file (default: `rperf.json.gz`) |
 | `-f HZ` | Sampling frequency in Hz (default: 1000) |
 | `-m MODE` | `cpu` or `wall` (default: `cpu`) |
-| `--format FMT` | `marshal`, `json`, `pprof`, `collapsed`, or `text` (default: auto from extension) |
+| `--format FMT` | `json`, `pprof`, `collapsed`, or `text` (default: auto from extension) |
 | `-p, --print` | Print text profile to stdout (same as `--format=text --output=/dev/stdout`) |
 | `-v` | Print sampling statistics to stderr |
 
 ## rperf report
 
-[`rperf report`](#index:rperf report) opens a profile for analysis. For marshal (`.marshal.gz`) and JSON (`.json.gz`) files, it opens the rperf viewer (no external tools required). For pprof (`.pb.gz`) files, it wraps `go tool pprof` and requires Go to be installed.
+[`rperf report`](#index:rperf report) opens a profile for analysis. For JSON (`.json.gz`) files, it opens the rperf viewer (no external tools required). For pprof (`.pb.gz`) files, it wraps `go tool pprof` and requires Go to be installed.
 
 ```bash
-# Open rperf viewer (default, marshal format)
+# Open rperf viewer (default, JSON format)
 rperf report
 
 # Open a specific file
-rperf report profile.marshal.gz
+rperf report profile.json.gz
 
 # Open a pprof file (requires Go)
 rperf report profile.pb.gz
@@ -287,7 +287,7 @@ rperf report --text
 Using the `fib.rb` profile recorded earlier:
 
 ```bash
-rperf report --top rperf.marshal.gz
+rperf report --top rperf.json.gz
 ```
 
 ```
@@ -298,7 +298,7 @@ Showing nodes accounting for 577.31ms, 100% of 577.31ms total
          0     0%   100%   577.31ms   100%  <main>
 ```
 
-The default behavior (without `--top` or `--text`) opens the rperf viewer for marshal/json files, or an interactive web UI powered by [pprof](#cite:ren2010) for `.pb.gz` files.
+The default behavior (without `--top` or `--text`) opens the rperf viewer for JSON files, or an interactive web UI powered by [pprof](#cite:ren2010) for `.pb.gz` files.
 
 ### report options
 

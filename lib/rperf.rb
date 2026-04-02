@@ -217,6 +217,7 @@ module Rperf
     samples.each do |sample|
       vm_state = sample[4] || 0
       next if vm_state == 0
+      next unless VM_STATE_LABELS.key?(vm_state)
 
       label_set_id = sample[3] || 0
       cache_key = [label_set_id, vm_state]
@@ -255,8 +256,6 @@ module Rperf
       File.write(path, Collapsed.encode(data))
     when :text
       File.write(path, Text.encode(data))
-    when :marshal
-      File.binwrite(path, gzip(Marshal.dump(data.merge(rperf_version: VERSION))))
     when :json
       require "json"
       File.binwrite(path, gzip(JSON.generate(data.merge(rperf_version: VERSION))))
@@ -266,19 +265,15 @@ module Rperf
   end
   private_class_method :write_data
 
-  # Load a profile saved by rperf record (.marshal.gz or .json.gz).
+  # Load a profile saved by rperf record (.json.gz).
   # Returns the data hash (same format as Rperf.stop / Rperf.snapshot).
   # Warns to stderr if the file was saved by a different rperf version.
   def self.load(path)
     compressed = File.binread(path)
     raw = Zlib::GzipReader.new(StringIO.new(compressed)).read
-    data = if path =~ /\.json(\.gz)?\z/
-             require "json"
-             JSON.parse(raw, symbolize_names: true)
-           else
-             Marshal.load(raw)
-           end
-    saved_version = data.delete(:rperf_version) || data.delete("rperf_version")
+    require "json"
+    data = JSON.parse(raw, symbolize_names: true)
+    saved_version = data.delete(:rperf_version)
     if saved_version && saved_version != VERSION
       $stderr.puts "rperf: warning: file was saved by rperf #{saved_version} (current: #{VERSION})"
     elsif saved_version.nil?
@@ -290,10 +285,9 @@ module Rperf
   def self.detect_format(path, format)
     return format.to_sym if format
     case path.to_s
-    when /\.collapsed\z/ then :collapsed
-    when /\.txt\z/       then :text
-    when /\.marshal(\.gz)?\z/ then :marshal
-    when /\.json(\.gz)?\z/    then :json
+    when /\.collapsed\z/   then :collapsed
+    when /\.txt\z/         then :text
+    when /\.json(\.gz)?\z/ then :json
     else :pprof
     end
   end
@@ -606,7 +600,7 @@ module Rperf
                     end
     _rperf_aggregate = ENV["RPERF_AGGREGATE"] != "0"
     _rperf_start_opts = { frequency: (ENV["RPERF_FREQUENCY"] || 1000).to_i, mode: _rperf_mode,
-                          output: _rperf_stat ? ENV["RPERF_OUTPUT"] : (ENV["RPERF_OUTPUT"] || "rperf.marshal.gz"),
+                          output: _rperf_stat ? ENV["RPERF_OUTPUT"] : (ENV["RPERF_OUTPUT"] || "rperf.json.gz"),
                           verbose: ENV["RPERF_VERBOSE"] == "1",
                           format: _rperf_format,
                           stat: _rperf_stat,

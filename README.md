@@ -38,11 +38,11 @@ $ rperf exec ruby fib.rb
             64.5 ms   sys
          2,035.5 ms   real
 
-         2,034.2 ms 100.0%  CPU execution
-               1            [Ruby] detected threads
-             7.0 ms         [Ruby] GC time (7 count: 5 minor, 2 major)
-         106,078            [Ruby] allocated objects
-              22 MB         [OS] peak memory (maxrss)
+         2,034.2 ms 100.0%  [Rperf] CPU execution
+             7.0 ms         [Ruby ] GC time (7 count: 5 minor, 2 major)
+         106,078            [Ruby ] allocated objects
+               1            [Ruby ] detected threads
+              22 MB         [OS   ] peak memory (maxrss)
 
  Flat:
          2,034.2 ms 100.0%  Object#fibonacci (fib.rb)
@@ -61,11 +61,11 @@ $ rperf exec ruby fib.rb
 rperf stat ruby app.rb
 
 # Record a pprof profile to file
-rperf record ruby app.rb                              # → rperf.marshal.gz (cpu mode)
+rperf record ruby app.rb                              # → rperf.json.gz (cpu mode)
 rperf record -m wall -o profile.pb.gz ruby server.rb   # wall mode, custom output
 
 # View results (report/diff require Go: https://go.dev/dl/)
-rperf report                      # open rperf.marshal.gz in browser
+rperf report                      # open rperf.json.gz in browser
 rperf report --top profile.pb.gz  # print top functions to terminal
 
 # Compare two profiles
@@ -125,7 +125,7 @@ Inspired by Linux `perf` — familiar subcommand interface for profiling workflo
 | `rperf record` | Profile a command and save to file |
 | `rperf stat` | Profile a command and print summary to stderr |
 | `rperf exec` | Profile a command and print full report to stderr |
-| `rperf report` | Open viewer for marshal/json files; falls back to `go tool pprof` for `.pb.gz` (requires Go) |
+| `rperf report` | Open viewer for `.json.gz` files; falls back to `go tool pprof` for `.pb.gz` (requires Go) |
 | `rperf diff` | Compare two pprof profiles (requires Go) |
 | `rperf help` | Show full reference documentation |
 
@@ -195,8 +195,7 @@ rperf hooks GVL and GC events to attribute non-CPU time. These are recorded as l
 
 | Format | Extension | Tools |
 |--------|-----------|-------|
-| marshal (default) | `.marshal.gz` | `rperf report` (viewer), `Rperf.load` |
-| json | `.json.gz` | `rperf report` (viewer), `Rperf.load`, any JSON tool |
+| json (default) | `.json.gz` | `rperf report` (viewer), `Rperf.load`, any JSON tool |
 | pprof | `.pb.gz` | `rperf report` (requires Go), `go tool pprof`, speedscope |
 | collapsed | `.collapsed` | FlameGraph, speedscope |
 | text | `.txt` | any text viewer |

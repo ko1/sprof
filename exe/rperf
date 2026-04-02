@@ -44,7 +44,7 @@ def run_pprof_subcommand(name, banner, min_files:)
   end
 
   files = ARGV.shift(min_files > 1 ? [ARGV.size, min_files].min : 1)
-  files = ["rperf.marshal.gz"] if files.empty? && min_files == 1
+  files = ["rperf.json.gz"] if files.empty? && min_files == 1
 
   if min_files > 1 && files.size < min_files
     $stderr.puts "Two profile files required."
@@ -95,12 +95,12 @@ when "report"
   run_pprof_subcommand("report",
     "Usage: rperf report [options] [file]\n" \
     "       Opens profile in browser (default) or prints summary.\n" \
-    "       Default file: rperf.marshal.gz\n" \
-    "       For .marshal.gz: opens rperf viewer (no Go required).\n" \
+    "       Default file: rperf.json.gz\n" \
+    "       For .json.gz: opens rperf viewer (no Go required).\n" \
     "       For .pb.gz: opens go tool pprof (requires Go).",
     min_files: 1) do |mode, files|
     report_file = files[0]
-    if report_file =~ /\.(marshal|json)(\.gz)?\z/
+    if report_file =~ /\.json(\.gz)?\z/
       # Use rperf viewer
       require_relative "../lib/rperf"
       require_relative "../lib/rperf/viewer"
@@ -140,13 +140,19 @@ when "report"
       end
 
       # Find an available Rack handler
-      require "rackup/handler"
+      begin
+        require "rackup/handler"
+      rescue LoadError
+        $stderr.puts "Error: 'rackup' gem is required for 'rperf report'. Install it with:"
+        $stderr.puts "  gem install rackup"
+        exit 1
+      end
       handler = Rackup::Handler.default
       handler.run(app, Port: port, Host: "localhost", Silent: true)
       exit
     else
       unless system("go", "version", out: File::NULL, err: File::NULL)
-        $stderr.puts "'go' command not found. Install Go to use pprof files, or use .marshal.gz format."
+        $stderr.puts "'go' command not found. Install Go to use pprof files, or use .json.gz format."
         $stderr.puts "  https://go.dev/dl/"
         exit 1
       end
@@ -182,7 +188,7 @@ else
   exit 1
 end
 
-output = (subcommand == "record") ? "rperf.marshal.gz" : nil
+output = (subcommand == "record") ? "rperf.json.gz" : nil
 frequency = 1000
 mode = (subcommand == "record") ? "cpu" : "wall"
 format = nil
@@ -198,7 +204,7 @@ parser = OptionParser.new do |opts|
                 when "exec"   then "Usage: rperf exec [options] command [args...]"
                 end
 
-  opts.on("-o", "--output PATH", "Output file#{subcommand == 'record' ? ' (default: rperf.marshal.gz)' : ' (default: none)'}") do |v|
+  opts.on("-o", "--output PATH", "Output file#{subcommand == 'record' ? ' (default: rperf.json.gz)' : ' (default: none)'}") do |v|
     output = v
   end
 
@@ -212,8 +218,8 @@ parser = OptionParser.new do |opts|
   end
 
   if subcommand == "record"
-    opts.on("--format FORMAT", %w[pprof collapsed text marshal json],
-            "Output format: pprof, collapsed, text, marshal, or json (default: auto from extension)") do |v|
+    opts.on("--format FORMAT", %w[pprof collapsed text json],
+            "Output format: json, pprof, collapsed, or text (default: auto from extension)") do |v|
       format = v
     end
 

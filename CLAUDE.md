@@ -5,7 +5,7 @@
 rperf is a safepoint-based sampling performance profiler for Ruby. It uses actual time deltas (not uniform sample counts) as weights to correct safepoint bias.
 
 - Requires Ruby >= 3.4.0 (POSIX systems: Linux, macOS, etc.)
-- Output: marshal (native), JSON, pprof protobuf, collapsed stacks, or text report
+- Output: JSON (native, default), pprof protobuf, collapsed stacks, or text report
 
 ## Architecture
 
@@ -58,7 +58,7 @@ See `benchmark/README.md` for full documentation.
 - **GC phase tracking**: Hooks GC_ENTER/GC_EXIT events. Records GC mark/sweep samples with `vm_state` (converted to `%GC: mark` / `%GC: sweep` labels at encode time), with wall time weight, attributed to the stack that triggered GC.
 - **Deferred string resolution**: Sampling stores raw frame VALUEs in a pool (no synthetic frame VALUEs — GVL/GC state is tracked via `vm_state` enum, not frames). String resolution (`rb_profile_frame_full_label`, `rb_profile_frame_path`) happens at stop time, not during sampling. This keeps the hot path allocation-free.
 - **No protobuf dependency**: pprof format is encoded with a hand-written encoder in `lib/rperf.rb` (`Rperf::PProf.encode`). String table is built in Ruby at encode time.
-- **Multiple output formats**: marshal (rperf native, gzip Marshal dump — default), JSON (rperf native, gzip JSON), pprof (gzip protobuf), collapsed stacks (FlameGraph/speedscope), text (human/AI-readable report). Format auto-detected from file extension. marshal/JSON preserve all internal data; `rperf report` opens them in the viewer without Go.
+- **Multiple output formats**: JSON (rperf native, gzip JSON — default), pprof (gzip protobuf), collapsed stacks (FlameGraph/speedscope), text (human/AI-readable report). Format auto-detected from file extension. JSON preserves all internal data; `rperf report` opens it in the viewer without Go.
 - **Timer implementation**: On Linux, defaults to `timer_create` + `SIGEV_SIGNAL` with a `sigaction` handler (SIGRTMIN+8 by default). This gives precise interval timing (median ~1000us at 1000Hz) with no extra thread. The signal number can be changed via `signal:` option. On non-Linux (macOS etc.) or with `signal: false`, falls back to a dedicated pthread + `nanosleep` loop (simpler but ~100us drift per tick).
 - **Fork safety**: `pthread_atfork` child handler silently stops profiling in the child process. Clears timer/signal state, removes event hooks, and frees sample/frame buffers. The child can start a fresh profiling session; the parent continues unaffected.
 - **Two clock modes**: cpu (`CLOCK_THREAD_CPUTIME_ID`) and wall (`CLOCK_MONOTONIC`).
@@ -82,7 +82,7 @@ See `benchmark/README.md` for full documentation.
 - GVL blocked/wait samples (with `%GVL` labels) are only recorded in wall mode (CPU time doesn't advance while off-GVL). The C extension returns `vm_state` as a field in `rperf_agg_entry_t`; Ruby's `merge_vm_state_labels!` converts these to `%GVL` / `%GC` labels in `label_sets`. The agg key includes `vm_state` so same-stack different-state samples are kept separate.
 - GC samples always use wall time regardless of mode.
 - `stat` subcommand defaults to wall mode, outputs user/sys/real + time breakdown + GC stats. `--report` adds flat/cumulative top-50 tables. `record -p` prints text profile to stdout.
-- `report` opens marshal/json files in the rperf viewer (no Go required) or falls back to `go tool pprof` for .pb.gz files. `diff` still requires Go.
+- `report` opens .json.gz files in the rperf viewer (no Go required) or falls back to `go tool pprof` for .pb.gz files. `diff` still requires Go.
 - Benchmark workload methods (rw/cw/csleep/cwait) are numbered 1-1000 to appear as distinct functions in profiler output.
 
 ## Documentation
