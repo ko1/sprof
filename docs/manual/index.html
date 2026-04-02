@@ -2997,7 +2997,7 @@ graph TD
 
 <h2 id="en--05-interpreting-results--vm-state-labels">5.3 VM state labels</h2>
 
-<p>In addition to normal Ruby frames, rperf tracks non-CPU activity as <strong>labels</strong> (tags) on samples. The C extension records a <code>vm_state</code> for each sample, and Ruby converts these to labels with keys <code>%GVL</code> and <code>%GC</code> before encoding. These labels appear in <code>label_sets</code> alongside user labels (like <code>endpoint</code>), and in pprof output as sample labels that can be filtered with <code>-tagfocus</code>, <code>-tagroot</code>, and <code>-tagleaf</code>.</p>
+<p>In addition to normal Ruby frames, rperf tracks non-CPU activity as <strong>labels</strong> (tags) on samples. The C extension records a <code>vm_state</code> for each sample, and Ruby converts these to labels with keys <code>%GVL</code> and <code>%GC</code> before encoding. These labels appear in <code>label_sets</code> alongside user labels (like <code>endpoint</code>), and can be filtered with the viewer’s tagfocus, tagroot, and tagleaf controls.</p>
 
 <h3 id="en--05-interpreting-results--gvl-blocked">5.3.1 %GVL: blocked</h3>
 
@@ -6126,7 +6126,7 @@ graph TD
 
 <h2 id="ja--05-interpreting-results--vm-状態ラベル">5.3 VM 状態ラベル</h2>
 
-<p>通常のユーザー定義ラベルに加えて、rperf は GVL や GC の状態を表す特別なラベルをサンプルに付与します。これらは合成フレームではなく、<code>label_sets</code> に格納されるラベルです。pprof の <code>-tagfocus</code>、<code>-tagroot</code>、<code>-tagleaf</code> でフィルタリングやグループ化が可能です。</p>
+<p>通常のユーザー定義ラベルに加えて、rperf は GVL や GC の状態を表す特別なラベルをサンプルに付与します。これらは合成フレームではなく、<code>label_sets</code> に格納されるラベルです。ビューアの tagfocus、tagroot、tagleaf でフィルタリングやグループ化が可能です。</p>
 
 <p>C 拡張は各サンプルに <code>vm_state</code> を記録し、Ruby の <code>Rperf.stop</code> で <code>merge_vm_state_labels!</code> によってラベルに変換されます。</p>
 

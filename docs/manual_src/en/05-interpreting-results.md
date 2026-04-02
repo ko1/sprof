@@ -29,7 +29,7 @@ All weights in rperf are in **nanoseconds**, regardless of profiling mode:
 
 ## VM state labels
 
-In addition to normal Ruby frames, rperf tracks non-CPU activity as **labels** (tags) on samples. The C extension records a `vm_state` for each sample, and Ruby converts these to labels with keys `%GVL` and `%GC` before encoding. These labels appear in `label_sets` alongside user labels (like `endpoint`), and in pprof output as sample labels that can be filtered with `-tagfocus`, `-tagroot`, and `-tagleaf`.
+In addition to normal Ruby frames, rperf tracks non-CPU activity as **labels** (tags) on samples. The C extension records a `vm_state` for each sample, and Ruby converts these to labels with keys `%GVL` and `%GC` before encoding. These labels appear in `label_sets` alongside user labels (like `endpoint`), and can be filtered with the viewer's tagfocus, tagroot, and tagleaf controls.
 
 ### %GVL: blocked
 
