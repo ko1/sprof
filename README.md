@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  pprof / collapsed stacks / text report &nbsp;·&nbsp; CPU mode & wall mode (GVL + GC tracking)
+  Built-in flamegraph viewer &nbsp;·&nbsp; CPU mode & wall mode (GVL + GC tracking)
 </p>
 
 <p align="center">
@@ -29,29 +29,34 @@
 ## See It in Action
 
 ```bash
-$ gem install rperf
 $ rperf exec ruby fib.rb
 
  Performance stats for 'ruby fib.rb':
 
-         2,326.0 ms   user
-            64.5 ms   sys
-         2,035.5 ms   real
+         2,023.3 ms   user
+             4.3 ms   sys
+         2,001.8 ms   real
 
-         2,034.2 ms 100.0%  [Rperf] CPU execution
-             7.0 ms         [Ruby ] GC time (7 count: 5 minor, 2 major)
-         106,078            [Ruby ] allocated objects
+         2,000.3 ms 100.0%  [Rperf] CPU execution
+             3.0 ms         [Ruby ] GC time (4 count: 2 minor, 2 major)
+          48,741            [Ruby ] allocated objects
+          27,034            [Ruby ] freed objects
                1            [Ruby ] detected threads
-              22 MB         [OS   ] peak memory (maxrss)
+              16 MB         [OS   ] peak memory (maxrss)
+           5,784            [OS   ] page faults (5,783 minor, 1 major)
+              22            [OS   ] context switches (13 voluntary, 9 involuntary)
+               0 MB         [OS   ] disk I/O (0 MB read, 0 MB write)
 
  Flat:
-         2,034.2 ms 100.0%  Object#fibonacci (fib.rb)
+         1,998.4 ms  99.9%  Object#fibonacci (fib.rb)
+             1.9 ms   0.1%  Module#method_added (<C method>)
 
  Cumulative:
-         2,034.2 ms 100.0%  Object#fibonacci (fib.rb)
-         2,034.2 ms 100.0%  <main> (fib.rb)
+         2,000.3 ms 100.0%  <main> (fib.rb)
+         1,998.4 ms  99.9%  Object#fibonacci (fib.rb)
+             1.9 ms   0.1%  Module#method_added (<C method>)
 
-  2034 samples / 2034 triggers, 0.1% profiler overhead
+  1999 samples / 1999 triggers, 0.1% profiler overhead
 ```
 
 ## Quick Start
@@ -60,17 +65,16 @@ $ rperf exec ruby fib.rb
 # Performance summary (wall mode, prints to stderr)
 rperf stat ruby app.rb
 
-# Record a pprof profile to file
-rperf record ruby app.rb                              # → rperf.json.gz (cpu mode)
-rperf record -m wall -o profile.pb.gz ruby server.rb   # wall mode, custom output
+# Record a profile to file
+rperf record ruby app.rb                     # → rperf.json.gz (cpu mode, default)
+rperf record -m wall ruby server.rb          # wall mode
 
-# View results (report/diff require Go: https://go.dev/dl/)
-rperf report                      # open rperf.json.gz in browser
-rperf report --top profile.pb.gz  # print top functions to terminal
+# View results in browser (no external tools needed)
+rperf report                                 # open rperf.json.gz in viewer
+rperf report --top profile.json.gz           # print top functions to terminal
 
-# Compare two profiles
-rperf diff before.pb.gz after.pb.gz        # open diff in browser
-rperf diff --top before.pb.gz after.pb.gz  # print diff to terminal
+# Compare two profiles (requires Go)
+rperf diff before.json.gz after.json.gz      # open diff in browser
 ```
 
 ### Ruby API
@@ -79,7 +83,7 @@ rperf diff --top before.pb.gz after.pb.gz  # print diff to terminal
 require "rperf"
 
 # Block form — profiles and saves to file
-Rperf.start(output: "profile.pb.gz", frequency: 500, mode: :cpu) do
+Rperf.start(output: "profile.json.gz", frequency: 500, mode: :cpu) do
   # code to profile
 end
 
@@ -87,7 +91,7 @@ end
 Rperf.start(frequency: 1000, mode: :wall)
 # ...
 data = Rperf.stop
-Rperf.save("profile.pb.gz", data)
+Rperf.save("profile.json.gz", data)
 ```
 
 ### In-browser Viewer
@@ -106,17 +110,18 @@ run MyApp
 Thread.new { loop { sleep 3600; Rperf::Viewer.instance&.take_snapshot! } }
 ```
 
-> **Note:** `Rperf::Viewer` has no built-in authentication. In production, restrict access with your framework's auth mechanisms (e.g., route constraints in Rails). See the [manual](https://ko1.github.io/rperf/) for examples.
+> **Note:** `Rperf::Viewer` has no built-in authentication. In production, restrict access with your framework's auth mechanisms (e.g., route constraints in Rails). See the [manual](https://ko1.github.io/rperf/docs/manual/) for examples.
 
 ### Environment Variables
 
 Profile without code changes (e.g., Rails):
 
 ```bash
-RPERF_ENABLED=1 RPERF_MODE=wall RPERF_OUTPUT=profile.pb.gz ruby app.rb
+RPERF_ENABLED=1 RPERF_MODE=wall ruby app.rb    # → rperf.json.gz
+rperf report                                    # open in viewer
 ```
 
-Run `rperf help` for full documentation, or see the [online manual](https://ko1.github.io/rperf/).
+Run `rperf help` for full documentation, or see the [online manual](https://ko1.github.io/rperf/docs/manual/).
 
 ## Subcommands
 
@@ -124,11 +129,11 @@ Inspired by Linux `perf` — familiar subcommand interface for profiling workflo
 
 | Command | Description |
 |---------|-------------|
-| `rperf record` | Profile a command and save to file |
+| `rperf record` | Profile a command and save to file (default: `.json.gz`) |
 | `rperf stat` | Profile a command and print summary to stderr |
 | `rperf exec` | Profile a command and print full report to stderr |
-| `rperf report` | Open viewer for `.json.gz` files; falls back to `go tool pprof` for `.pb.gz` (requires Go) |
-| `rperf diff` | Compare two pprof profiles (requires Go) |
+| `rperf report` | Open viewer for `.json.gz`; wraps `go tool pprof` for `.pb.gz` (requires Go) |
+| `rperf diff` | Compare two profiles (requires Go) |
 | `rperf help` | Show full reference documentation |
 
 ## How It Works
@@ -180,8 +185,8 @@ rperf hooks GVL and GC events to attribute non-CPU time. These are recorded as l
 
 - **Accurate despite safepoints** — Safepoint sampling is *safer* (no async-signal-safety issues), but normally *inaccurate*. rperf compensates with real time-delta weights, so profiles faithfully reflect where time is actually spent.
 - **See the whole picture** (wall mode) — GVL contention, off-GVL I/O, GC marking/sweeping — all attributed to the call stacks responsible, via sample labels.
-- **Low overhead** — Signal-based timer on Linux (no extra thread). ~1–5 µs per sample.
-- **pprof compatible** — Works with `go tool pprof`, speedscope, and other standard tools out of the box.
+- **Built-in viewer** — Flamegraph, Top, Tags tabs with interactive tag filtering. No external tools needed to analyze profiles.
+- **Low overhead** — Signal-based timer on Linux (no extra thread). ~1–5 us per sample.
 - **Zero code changes** — Profile any Ruby program via CLI or environment variables. Drop-in for Rails, too.
 - **`perf`-like CLI** — `record`, `stat`, `report`, `diff` — if you know Linux perf, you already know rperf.
 
@@ -195,10 +200,10 @@ rperf hooks GVL and GC events to attribute non-CPU time. These are recorded as l
 
 ## Output Formats
 
-| Format | Extension | Tools |
-|--------|-----------|-------|
-| json (default) | `.json.gz` | `rperf report` (viewer), `Rperf.load`, any JSON tool |
-| pprof | `.pb.gz` | `rperf report` (requires Go), `go tool pprof`, speedscope |
+| Format | Extension | Viewer |
+|--------|-----------|--------|
+| JSON (default) | `.json.gz` | `rperf report` (built-in viewer), `Rperf.load`, any JSON tool |
+| pprof | `.pb.gz` | `go tool pprof` (requires Go), speedscope |
 | collapsed | `.collapsed` | FlameGraph, speedscope |
 | text | `.txt` | any text viewer |
 
