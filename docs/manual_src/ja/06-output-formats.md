@@ -1,10 +1,52 @@
 # 出力形式
 
-rperf は 3 つの出力形式をサポートしています。形式はファイル拡張子から自動検出されるか、`--format` フラグ（CLI）または `format:` パラメータ（API）で明示的に設定できます。
+rperf は 5 つの出力形式をサポートしています。形式はファイル拡張子から自動検出されるか、`--format` フラグ（CLI）または `format:` パラメータ（API）で明示的に設定できます。
 
-## pprof (デフォルト)
+## marshal (デフォルト)
 
-[pprof](#index:pprof) 形式は gzip 圧縮された Protocol Buffers バイナリです。これは Go の pprof ツールで使用される標準形式で、rperf のデフォルト出力です。
+[marshal](#index:marshal) 形式は gzip 圧縮された Ruby Marshal dump で、rperf 独自の形式です。すべてのサンプルデータ、メタデータ、ラベルを保持し、rperf の組み込みビューアで表示できます（Go 不要）。
+
+**拡張子の規約**: `.marshal.gz`
+
+**表示方法**:
+
+```bash
+# rperf ビューアで開く（外部ツール不要）
+rperf report profile.marshal.gz
+```
+
+**Ruby でロード**:
+
+```ruby
+data = Rperf.load("profile.marshal.gz")
+```
+
+**利点**: rperf のネイティブ形式。表示に外部ツール不要。Ruby にロードし直してプログラマティックに分析可能。
+
+## json
+
+JSON 形式は gzip 圧縮された JSON によるプロファイルデータの表現です。
+
+**拡張子の規約**: `.json.gz`
+
+**表示方法**:
+
+```bash
+# rperf ビューアで開く（外部ツール不要）
+rperf report profile.json.gz
+```
+
+**Ruby でロード**:
+
+```ruby
+data = Rperf.load("profile.json.gz")
+```
+
+**利点**: ポータブルで人間が読みやすい形式。Ruby にロードし直したり、JSON 対応の任意のツールで処理可能。
+
+## pprof
+
+[pprof](#index:pprof) 形式は gzip 圧縮された Protocol Buffers バイナリです。これは Go の pprof ツールで使用される標準形式です。
 
 **拡張子の規約**: `.pb.gz`
 
@@ -138,22 +180,25 @@ Samples: 509, Frequency: 1000Hz
 
 ## 形式の比較
 
-| 機能 | pprof | collapsed | text |
-|---------|-------|-----------|------|
-| ファイルサイズ | 小 (バイナリ + gzip) | 中 (テキスト) | 小 (テキスト) |
-| フレームグラフ | あり (pprof Web UI) | あり (flamegraph.pl) | なし |
-| コールグラフ | あり | なし | なし |
-| 差分比較 | あり (`rperf diff`) | なし | なし |
-| ツール不要 | いいえ (Go 必要) | いいえ (flamegraph.pl 必要) | はい |
-| プログラマティックなパース | 複雑 (protobuf) | シンプル | シンプル |
-| AI フレンドリー | いいえ | はい | はい |
+| 機能 | marshal | json | pprof | collapsed | text |
+|---------|---------|------|-------|-----------|------|
+| ファイルサイズ | 小 (バイナリ + gzip) | 中 (json + gzip) | 小 (バイナリ + gzip) | 中 (テキスト) | 小 (テキスト) |
+| フレームグラフ | あり (rperf ビューア) | あり (rperf ビューア) | あり (pprof Web UI) | あり (flamegraph.pl) | なし |
+| コールグラフ | なし | なし | あり | なし | なし |
+| 差分比較 | なし | なし | あり (`rperf diff`) | なし | なし |
+| ツール不要 | はい | はい | いいえ (Go 必要) | いいえ (flamegraph.pl 必要) | はい |
+| Ruby にロード | あり (`Rperf.load`) | あり (`Rperf.load`) | なし | なし | なし |
+| プログラマティックなパース | 容易 (Ruby Marshal) | 容易 (JSON) | 複雑 (protobuf) | シンプル | シンプル |
+| AI フレンドリー | いいえ | はい | いいえ | はい | はい |
 
 ## 自動検出ルール
 
 | ファイル拡張子 | 形式 |
 |----------------|--------|
+| `.marshal.gz` | marshal (デフォルト) |
+| `.json.gz` | JSON |
+| `.pb.gz` | pprof |
 | `.collapsed` | Collapsed stacks |
 | `.txt` | テキストレポート |
-| その他 | pprof |
 
-デフォルトの出力ファイル（`rperf.data`）は pprof 形式を使用します。
+デフォルトの出力ファイル（`rperf.marshal.gz`）は marshal 形式を使用します。

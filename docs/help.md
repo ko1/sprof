@@ -16,7 +16,7 @@ POSIX systems (Linux, macOS). Requires Ruby >= 3.4.0.
 
 ### record: Profile and save to file.
 
-    -o, --output PATH       Output file (default: rperf.data)
+    -o, --output PATH       Output file (default: rperf.marshal.gz)
     -f, --frequency HZ      Sampling frequency in Hz (default: 1000)
     -m, --mode MODE         cpu or wall (default: cpu)
     --format FORMAT         pprof, collapsed, or text (default: auto from extension)
@@ -64,7 +64,7 @@ and flat/cumulative top-50 function tables.
     --text                  Print text report
 
 Default (no flag): opens interactive web UI in browser.
-Default file: rperf.data
+Default file: rperf.marshal.gz
 
 ### diff: Compare two pprof profiles (target - base). Requires Go.
 
@@ -286,6 +286,82 @@ Sidekiq.configure_server do |config|
 end
 ```
 
+### Rperf::Viewer (Rack middleware)
+
+In-browser profiling UI with flamegraph, top table, and tag breakdown.
+Requires `require "rperf/viewer"`.
+
+```ruby
+# config.ru or Rails config
+require "rperf/viewer"
+use Rperf::Viewer                         # mount at /rperf/ (default)
+use Rperf::Viewer, path: "/profiler"      # custom mount path
+use Rperf::Viewer, max_snapshots: 12      # keep fewer snapshots (default: 24)
+```
+
+Take snapshots via `Rperf::Viewer.instance.take_snapshot!` or
+`Rperf::Viewer.instance.add_snapshot(data)`.
+
+#### Typical setup with RackMiddleware and periodic snapshots
+
+```ruby
+require "rperf/viewer"
+require "rperf/rack"
+
+Rperf.start(mode: :wall, frequency: 999, defer: true)
+use Rperf::Viewer
+use Rperf::RackMiddleware
+run MyApp
+
+# Take a snapshot every 60 minutes in a background thread
+Thread.new do
+  loop do
+    sleep 60 * 60
+    Rperf::Viewer.instance&.take_snapshot!
+  end
+end
+```
+
+Visit `/rperf/` in a browser. Snapshots accumulate automatically
+(up to `max_snapshots`, oldest are discarded). You can also trigger
+a snapshot manually via an endpoint or console:
+
+```ruby
+Rperf::Viewer.instance.take_snapshot!
+```
+
+#### Access control
+
+Rperf::Viewer has no built-in authentication. Restrict access using
+your framework's existing mechanisms:
+
+```ruby
+# Rails: route constraint (e.g., admin-only)
+# config/routes.rb
+require "rperf/viewer"
+constraints ->(req) { req.session[:admin] } do
+  mount Rperf::Viewer.new(nil), at: "/rperf"
+end
+```
+
+#### UI tabs
+
+- **Flamegraph** — Interactive flamegraph (d3-flame-graph). Click to zoom.
+- **Top** — Flat/cumulative weight table. Click column headers to sort.
+- **Tags** — Label key/value breakdown with weight bars. Click a row to
+  set tagfocus and switch to Flamegraph.
+
+#### Filtering controls
+
+- **tagfocus** — Regex matched against label values. Press Enter to apply.
+- **tagignore** — Dropdown checkboxes. Select `key = (none)` to exclude
+  samples without that key (e.g., background threads without `endpoint`).
+- **tagroot** — Dropdown checkboxes for label keys. Checked keys are
+  prepended as root frames (e.g., `[endpoint: GET /users]`).
+- **tagleaf** — Same as tagroot but appended as leaf frames.
+
+Tag keys are sorted alphabetically (`%`-prefixed VM state keys appear first).
+
 ## PROFILING MODES
 
 - **cpu** — Measures per-thread CPU time via Linux thread clock.
@@ -299,11 +375,29 @@ end
 
 ## OUTPUT FORMATS
 
-### pprof (default)
+### marshal (default) — rperf native format
+
+Gzip-compressed Ruby Marshal dump of the internal data hash
+(the same hash returned by `Rperf.stop` / `Rperf.snapshot` — see
+"Return value" above for the full structure).
+Preserves all data including labels, VM state, thread info, and statistics.
+Extension convention: `.marshal.gz`
+View with: `rperf report` (opens rperf viewer in browser, no Go required).
+Load programmatically: `data = Rperf.load("rperf.marshal.gz")`
+
+### json — rperf native format (JSON)
+
+Gzip-compressed JSON representation of the same internal data hash.
+Same data as marshal, but readable by non-Ruby tools (Python, jq, etc.).
+Extension convention: `.json.gz`
+View with: `rperf report` (opens rperf viewer in browser, no Go required).
+Load programmatically: `data = Rperf.load("profile.json.gz")`
+
+### pprof
 
 Gzip-compressed protobuf. Standard pprof format.
 Extension convention: `.pb.gz`
-View with: `go tool pprof`, pprof-rs, or speedscope (via import).
+View with: `go tool pprof`, pprof-rs, speedscope, or `rperf report` (requires Go).
 
 Embedded metadata:
 
@@ -360,9 +454,11 @@ Example output:
 
 Format is auto-detected from the output file extension:
 
-    .collapsed → collapsed
-    .txt       → text
-    anything else → pprof
+    .marshal.gz → marshal (rperf native, default)
+    .json.gz    → json (rperf native, JSON)
+    .pb.gz      → pprof
+    .collapsed  → collapsed
+    .txt        → text
 
 The `--format` flag (CLI) or `format:` parameter (API) overrides auto-detect.
 

@@ -123,6 +123,88 @@ end
 > [!NOTE]
 > If you use Active Job with Sidekiq, choose one or the other — using both will result in duplicate labels. The Sidekiq middleware is more general (covers non-Active Job workers too).
 
+## In-browser viewer
+
+`Rperf::Viewer` is a Rack middleware that serves an interactive profiling UI at a configurable mount path. It stores snapshots in memory and renders them in the browser using [d3-flame-graph](https://github.com/nicedoc/d3-flame-graph). No external dependencies or build tools are required — the HTML, CSS, and JavaScript are all self-contained.
+
+```ruby
+require "rperf/viewer"
+```
+
+### Setup
+
+```ruby
+# config.ru (or Rails initializer)
+require "rperf/viewer"
+require "rperf/rack"
+
+Rperf.start(defer: true, mode: :wall, frequency: 999)
+
+use Rperf::Viewer                           # serves UI at /rperf/
+use Rperf::RackMiddleware                   # labels each request
+run MyApp
+
+# Take a snapshot every 60 minutes
+Thread.new do
+  loop do
+    sleep 60 * 60
+    Rperf::Viewer.instance&.take_snapshot!
+  end
+end
+```
+
+Visit `/rperf/` in a browser after snapshots have been taken.
+
+### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `path:` | `"/rperf"` | URL prefix for the viewer |
+| `max_snapshots:` | `24` | Maximum snapshots kept in memory (oldest discarded) |
+
+### Taking snapshots
+
+```ruby
+# Programmatically (e.g., from a controller, background thread, or console)
+Rperf::Viewer.instance.take_snapshot!
+
+# Or add pre-taken data
+data = Rperf.snapshot(clear: true)
+Rperf::Viewer.instance.add_snapshot(data)
+```
+
+### UI tabs
+
+The viewer has three tabs:
+
+- **Flamegraph** — Interactive flamegraph powered by d3-flame-graph. Click a frame to zoom in, click the root to zoom out.
+- **Top** — Flat and cumulative weight table (top 50 functions). Click column headers (Flat, Cum, Function) to sort.
+- **Tags** — Shows each label key with a breakdown of values by weight and percentage. Click a value row to set tagfocus and jump to the Flamegraph tab.
+
+### Filtering
+
+The controls bar at the top provides four filters:
+
+- **tagfocus** — Text input. Enter a regex to keep only samples whose label values match. Press Enter to apply.
+- **tagignore** — Dropdown with checkboxes. Check items to exclude matching samples. Each label key also has a `(none)` entry to exclude samples that do *not* have that key — useful for filtering out background threads that have no `endpoint` label.
+- **tagroot** — Dropdown with checkboxes for label keys. Checked keys are prepended as root frames in the flamegraph (e.g., `[endpoint: GET /users]` appears at the top of the stack).
+- **tagleaf** — Same as tagroot, but appended as leaf frames.
+
+Label keys are sorted alphabetically. The `%`-prefixed VM state keys (`%GC`, `%GVL`) appear first, making it easy to add GC or GVL state as leaf/root frames.
+
+### Access control
+
+`Rperf::Viewer` has no built-in authentication. Restrict access using your framework's existing mechanisms:
+
+```ruby
+# Rails: route constraint (admin-only)
+# config/routes.rb
+require "rperf/viewer"
+constraints ->(req) { req.session[:admin] } do
+  mount Rperf::Viewer.new(nil), at: "/rperf"
+end
+```
+
 ## On-demand profiling with Rperf.profile
 
 If you want to profile only specific endpoints or jobs — with zero overhead elsewhere — use [`Rperf.start(defer: true)`](#index:Rperf.start) and [`Rperf.profile`](#index:Rperf.profile):

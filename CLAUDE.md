@@ -5,13 +5,15 @@
 rperf is a safepoint-based sampling performance profiler for Ruby. It uses actual time deltas (not uniform sample counts) as weights to correct safepoint bias.
 
 - Requires Ruby >= 3.4.0 (POSIX systems: Linux, macOS, etc.)
-- Output: pprof protobuf, collapsed stacks, or text report
+- Output: marshal (native), JSON, pprof protobuf, collapsed stacks, or text report
 
 ## Architecture
 
 ```
 ext/rperf/rperf.c    -- C extension: timer (signal or thread), GVL/GC event hooks, sampling
 lib/rperf.rb         -- Ruby API: start/stop, encoders (PProf, Collapsed, Text), stat output
+lib/rperf/viewer.rb  -- Rack middleware: in-browser flamegraph viewer (d3-flame-graph)
+lib/rperf/rack.rb    -- Rack middleware: per-request label annotation
 exe/rperf            -- CLI: record, stat, exec, report, diff, help subcommands
 test/                -- Unit tests (per-component: profiler, gvl, output, stat, cli, fork)
 benchmark/           -- Accuracy benchmark suite (see benchmark/README.md)
@@ -56,13 +58,16 @@ See `benchmark/README.md` for full documentation.
 - **GC phase tracking**: Hooks GC_ENTER/GC_EXIT events. Records GC mark/sweep samples with `vm_state` (converted to `%GC: mark` / `%GC: sweep` labels at encode time), with wall time weight, attributed to the stack that triggered GC.
 - **Deferred string resolution**: Sampling stores raw frame VALUEs in a pool (no synthetic frame VALUEs — GVL/GC state is tracked via `vm_state` enum, not frames). String resolution (`rb_profile_frame_full_label`, `rb_profile_frame_path`) happens at stop time, not during sampling. This keeps the hot path allocation-free.
 - **No protobuf dependency**: pprof format is encoded with a hand-written encoder in `lib/rperf.rb` (`Rperf::PProf.encode`). String table is built in Ruby at encode time.
-- **Multiple output formats**: pprof (gzip protobuf), collapsed stacks (FlameGraph/speedscope), text (human/AI-readable report). Format auto-detected from file extension.
+- **Multiple output formats**: marshal (rperf native, gzip Marshal dump — default), JSON (rperf native, gzip JSON), pprof (gzip protobuf), collapsed stacks (FlameGraph/speedscope), text (human/AI-readable report). Format auto-detected from file extension. marshal/JSON preserve all internal data; `rperf report` opens them in the viewer without Go.
 - **Timer implementation**: On Linux, defaults to `timer_create` + `SIGEV_SIGNAL` with a `sigaction` handler (SIGRTMIN+8 by default). This gives precise interval timing (median ~1000us at 1000Hz) with no extra thread. The signal number can be changed via `signal:` option. On non-Linux (macOS etc.) or with `signal: false`, falls back to a dedicated pthread + `nanosleep` loop (simpler but ~100us drift per tick).
 - **Fork safety**: `pthread_atfork` child handler silently stops profiling in the child process. Clears timer/signal state, removes event hooks, and frees sample/frame buffers. The child can start a fresh profiling session; the parent continues unaffected.
 - **Two clock modes**: cpu (`CLOCK_THREAD_CPUTIME_ID`) and wall (`CLOCK_MONOTONIC`).
 - **Method-level profiling**: No line numbers. Frame labels use `rb_profile_frame_full_label` for qualified names (e.g., `Integer#times`).
 - **Sample labels**: `Rperf.label(key: value)` attaches per-thread key-value labels to samples. Label sets are interned in Ruby (Hash → integer ID). C stores only the integer `label_set_id` per thread/sample — zero hot-path overhead beyond one integer copy. Labels are written into pprof `Sample.label` fields at encode time. The agg_table key includes `label_set_id` so same-stack different-label samples are kept separate. If profiling is not running, `label` is silently ignored (safe to call unconditionally, e.g., from Rack).
 - **Deferred profiling**: `Rperf.start(defer: true)` starts profiler infrastructure but leaves the timer paused (`profile_refcount = 0`). `Rperf.profile(**labels) { block }` increments/decrements the refcount and arms/disarms the timer on 0↔1 transitions. Signal mode uses `timer_settime(zero)` to disarm; nanosleep mode uses `pthread_cond_wait` (infinite wait until signaled). On resume, all threads' `prev_time_ns` are reset to avoid inflated weights. `profile` also applies labels (like `label`), restored on block exit.
+
+- **Viewer (Rack middleware)**: `Rperf::Viewer` is a Rack middleware that serves an in-browser profiling UI at `/rperf/` (configurable via `path:` option). Snapshots are stored in memory (up to `max_snapshots:`, default 24). The UI has three tabs: **Flamegraph** (d3-flame-graph), **Top** (flat/cumulative table, sortable by column click), **Tags** (label key/value breakdown with weight bars, click to filter). Filtering: **tagfocus** (regex on label values, Enter to apply), **tagignore** (dropdown checkboxes, includes `key = (none)` to exclude untagged samples), **tagroot/tagleaf** (dropdown checkboxes for label keys, prepend/append to stack). Logo SVG is loaded from `docs/logo.svg` at require time and inlined into the HTML. Tag keys are sorted (so `%`-prefixed VM state keys appear first).
+- **RackMiddleware**: `Rperf::RackMiddleware` wraps requests with `Rperf.profile(endpoint: "GET /path")`, adding per-request labels and activating profiling for the duration of the request (works with `defer: true`).
 
 ## Coding Notes
 
@@ -77,7 +82,7 @@ See `benchmark/README.md` for full documentation.
 - GVL blocked/wait samples (with `%GVL` labels) are only recorded in wall mode (CPU time doesn't advance while off-GVL). The C extension returns `vm_state` as a field in `rperf_agg_entry_t`; Ruby's `merge_vm_state_labels!` converts these to `%GVL` / `%GC` labels in `label_sets`. The agg key includes `vm_state` so same-stack different-state samples are kept separate.
 - GC samples always use wall time regardless of mode.
 - `stat` subcommand defaults to wall mode, outputs user/sys/real + time breakdown + GC stats. `--report` adds flat/cumulative top-50 tables. `record -p` prints text profile to stdout.
-- `report` and `diff` subcommands are thin wrappers around `go tool pprof`.
+- `report` opens marshal/json files in the rperf viewer (no Go required) or falls back to `go tool pprof` for .pb.gz files. `diff` still requires Go.
 - Benchmark workload methods (rw/cw/csleep/cwait) are numbered 1-1000 to appear as distinct functions in profiler output.
 
 ## Documentation

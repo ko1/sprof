@@ -129,7 +129,7 @@ rperf exec [options] command [args...]
 rperf record ruby my_app.rb
 ```
 
-By default, it saves to `rperf.data` in pprof format with CPU mode.
+By default, it saves to `rperf.marshal.gz` in marshal format with CPU mode.
 
 ### Example: Recording a profile
 
@@ -137,7 +137,7 @@ By default, it saves to `rperf.data` in pprof format with CPU mode.
 rperf record ruby fib.rb
 ```
 
-This creates `rperf.data`. You can then analyze it with `rperf report` or other pprof-compatible tools.
+This creates `rperf.marshal.gz`. You can then analyze it with `rperf report` or convert to other formats.
 
 ### Choosing a profiling mode
 
@@ -159,7 +159,10 @@ rperf record -m wall ruby my_app.rb
 rperf auto-detects the format from the file extension:
 
 ```bash
-# pprof format (default)
+# marshal format (default)
+rperf record -o profile.marshal.gz ruby my_app.rb
+
+# pprof format
 rperf record -o profile.pb.gz ruby my_app.rb
 
 # Collapsed stacks (for FlameGraph / speedscope)
@@ -251,22 +254,25 @@ rperf record [options] command [args...]
 
 | Option | Description |
 |--------|-------------|
-| `-o PATH` | Output file (default: `rperf.data`) |
+| `-o PATH` | Output file (default: `rperf.marshal.gz`) |
 | `-f HZ` | Sampling frequency in Hz (default: 1000) |
 | `-m MODE` | `cpu` or `wall` (default: `cpu`) |
-| `--format FMT` | `pprof`, `collapsed`, or `text` (default: auto from extension) |
+| `--format FMT` | `marshal`, `json`, `pprof`, `collapsed`, or `text` (default: auto from extension) |
 | `-p, --print` | Print text profile to stdout (same as `--format=text --output=/dev/stdout`) |
 | `-v` | Print sampling statistics to stderr |
 
 ## rperf report
 
-[`rperf report`](#index:rperf report) opens a pprof profile for analysis. It wraps `go tool pprof` and requires Go to be installed.
+[`rperf report`](#index:rperf report) opens a profile for analysis. For marshal (`.marshal.gz`) and JSON (`.json.gz`) files, it opens the rperf viewer (no external tools required). For pprof (`.pb.gz`) files, it wraps `go tool pprof` and requires Go to be installed.
 
 ```bash
-# Open interactive web UI (default)
+# Open rperf viewer (default, marshal format)
 rperf report
 
 # Open a specific file
+rperf report profile.marshal.gz
+
+# Open a pprof file (requires Go)
 rperf report profile.pb.gz
 
 # Print top functions
@@ -281,7 +287,7 @@ rperf report --text
 Using the `fib.rb` profile recorded earlier:
 
 ```bash
-rperf report --top rperf.data
+rperf report --top rperf.marshal.gz
 ```
 
 ```
@@ -292,7 +298,7 @@ Showing nodes accounting for 577.31ms, 100% of 577.31ms total
          0     0%   100%   577.31ms   100%  <main>
 ```
 
-The default behavior (without `--top` or `--text`) opens an interactive web UI in your browser with flame graphs, top function views, and call graph visualizations powered by [pprof](#cite:ren2010).
+The default behavior (without `--top` or `--text`) opens the rperf viewer for marshal/json files, or an interactive web UI powered by [pprof](#cite:ren2010) for `.pb.gz` files.
 
 ### report options
 

@@ -129,7 +129,7 @@ rperf exec [options] command [args...]
 rperf record ruby my_app.rb
 ```
 
-デフォルトでは、CPU モードの pprof 形式で `rperf.data` に保存します。
+デフォルトでは、CPU モードの marshal 形式で `rperf.marshal.gz` に保存します。
 
 ### 例: プロファイルの記録
 
@@ -137,7 +137,7 @@ rperf record ruby my_app.rb
 rperf record ruby fib.rb
 ```
 
-これにより `rperf.data` が作成されます。その後 `rperf report` や他の pprof 互換ツールで分析できます。
+これにより `rperf.marshal.gz` が作成されます。その後 `rperf report` で分析したり、他の形式に変換したりできます。
 
 ### プロファイリングモードの選択
 
@@ -159,7 +159,10 @@ rperf record -m wall ruby my_app.rb
 rperf はファイル拡張子から形式を自動検出します:
 
 ```bash
-# pprof 形式 (デフォルト)
+# marshal 形式 (デフォルト)
+rperf record -o profile.marshal.gz ruby my_app.rb
+
+# pprof 形式
 rperf record -o profile.pb.gz ruby my_app.rb
 
 # collapsed stacks (FlameGraph / speedscope 向け)
@@ -217,9 +220,13 @@ Samples: 80, Frequency: 1000Hz
            253.8 ms  81.4%  Kernel#sleep (<C method>)
            253.8 ms  81.4%  Object#io_work (mixed.rb)
             58.0 ms  18.6%  Object#cpu_work (mixed.rb)
+
+ Labels:
+           250.6 ms  80.4%  %GVL: blocked
+             0.0 ms   0.0%  %GVL: wait
 ```
 
-wall モードでは、GVL ブロック時間や GVL 待ち時間はフレームとしてではなく、サンプルのラベル（`%GVL=blocked`、`%GVL=wait`）として記録されます。pprof で `-tagfocus=%GVL=blocked` を使うことで、I/O 待ちのサンプルだけをフィルタリングして分析できます。
+wall モードでは、`%GVL: blocked` ラベルが支配的なコストを示しています -- これは `io_work` の sleep 時間です。`cpu_work` の CPU 時間は明確に分離されています。GVL や GC のアクティビティはスタックフレームではなくサンプルのラベルとして記録され、pprof の `-tagfocus` フラグ（例: `-tagfocus=%GVL=blocked`）でフィルタリングできます。
 
 ### Verbose 出力
 
@@ -247,23 +254,23 @@ rperf record [options] command [args...]
 
 | オプション | 説明 |
 |--------|-------------|
-| `-o PATH` | 出力ファイル (デフォルト: `rperf.data`) |
+| `-o PATH` | 出力ファイル (デフォルト: `rperf.marshal.gz`) |
 | `-f HZ` | サンプリング周波数 (Hz) (デフォルト: 1000) |
 | `-m MODE` | `cpu` または `wall` (デフォルト: `cpu`) |
-| `--format FMT` | `pprof`、`collapsed`、または `text` (デフォルト: 拡張子から自動検出) |
+| `--format FMT` | `marshal`、`json`、`pprof`、`collapsed`、または `text` (デフォルト: 拡張子から自動検出) |
 | `-p, --print` | テキストプロファイルを stdout に出力 (`--format=text --output=/dev/stdout` と同等) |
 | `-v` | サンプリング統計を stderr に出力 |
 
 ## rperf report
 
-[`rperf report`](#index:rperf report) は pprof プロファイルを分析用に開きます。`go tool pprof` をラップしており、Go のインストールが必要です。
+[`rperf report`](#index:rperf report) はプロファイルを分析用に開きます。marshal/json 形式のファイルには rperf の組み込みビューアを使用し（Go 不要）、pprof 形式 (`.pb.gz`) のファイルには `go tool pprof` を使用します（Go が必要）。
 
 ```bash
 # インタラクティブな Web UI を開く (デフォルト)
 rperf report
 
 # 特定のファイルを開く
-rperf report profile.pb.gz
+rperf report profile.marshal.gz
 
 # 上位の関数を出力
 rperf report --top
@@ -277,7 +284,7 @@ rperf report --text
 先ほど記録した `fib.rb` のプロファイルを使用:
 
 ```bash
-rperf report --top rperf.data
+rperf report --top rperf.marshal.gz
 ```
 
 ```
@@ -288,7 +295,7 @@ Showing nodes accounting for 577.31ms, 100% of 577.31ms total
          0     0%   100%   577.31ms   100%  <main>
 ```
 
-デフォルト動作（`--top` や `--text` なし）では、フレームグラフ、上位関数ビュー、コールグラフの可視化を備えたインタラクティブな Web UI がブラウザで開きます。これは [pprof](#cite:ren2010) を利用しています。
+デフォルト動作（`--top` や `--text` なし）では、フレームグラフ、上位関数ビュー、コールグラフの可視化を備えたインタラクティブな Web UI がブラウザで開きます。marshal/json 形式では rperf 組み込みビューア、pprof 形式では [pprof](#cite:ren2010) を利用します。
 
 ### report のオプション
 

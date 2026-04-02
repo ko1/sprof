@@ -61,11 +61,11 @@ $ rperf exec ruby fib.rb
 rperf stat ruby app.rb
 
 # Record a pprof profile to file
-rperf record ruby app.rb                              # → rperf.data (cpu mode)
+rperf record ruby app.rb                              # → rperf.marshal.gz (cpu mode)
 rperf record -m wall -o profile.pb.gz ruby server.rb   # wall mode, custom output
 
 # View results (report/diff require Go: https://go.dev/dl/)
-rperf report                      # open rperf.data in browser
+rperf report                      # open rperf.marshal.gz in browser
 rperf report --top profile.pb.gz  # print top functions to terminal
 
 # Compare two profiles
@@ -90,6 +90,22 @@ data = Rperf.stop
 Rperf.save("profile.pb.gz", data)
 ```
 
+### In-browser Viewer
+
+```ruby
+# config.ru
+require "rperf/viewer"
+require "rperf/rack"
+
+Rperf.start(mode: :wall, defer: true)
+use Rperf::Viewer           # visit /rperf/ for flamegraph UI
+use Rperf::RackMiddleware   # labels each request
+run MyApp
+
+# Snapshot every 60 minutes
+Thread.new { loop { sleep 3600; Rperf::Viewer.instance&.take_snapshot! } }
+```
+
 ### Environment Variables
 
 Profile without code changes (e.g., Rails):
@@ -109,7 +125,7 @@ Inspired by Linux `perf` — familiar subcommand interface for profiling workflo
 | `rperf record` | Profile a command and save to file |
 | `rperf stat` | Profile a command and print summary to stderr |
 | `rperf exec` | Profile a command and print full report to stderr |
-| `rperf report` | Open pprof profile with `go tool pprof` (requires Go) |
+| `rperf report` | Open viewer for marshal/json files; falls back to `go tool pprof` for `.pb.gz` (requires Go) |
 | `rperf diff` | Compare two pprof profiles (requires Go) |
 | `rperf help` | Show full reference documentation |
 
@@ -177,11 +193,13 @@ rperf hooks GVL and GC events to attribute non-CPU time. These are recorded as l
 
 ## Output Formats
 
-| Format | Extension | Use case |
-|--------|-----------|----------|
-| pprof (default) | `.pb.gz` | `rperf report`, `go tool pprof`, speedscope |
-| collapsed | `.collapsed` | FlameGraph (`flamegraph.pl`), speedscope |
-| text | `.txt` | Human/AI-readable flat + cumulative report |
+| Format | Extension | Tools |
+|--------|-----------|-------|
+| marshal (default) | `.marshal.gz` | `rperf report` (viewer), `Rperf.load` |
+| json | `.json.gz` | `rperf report` (viewer), `Rperf.load`, any JSON tool |
+| pprof | `.pb.gz` | `rperf report` (requires Go), `go tool pprof`, speedscope |
+| collapsed | `.collapsed` | FlameGraph, speedscope |
+| text | `.txt` | any text viewer |
 
 Format is auto-detected from extension, or set explicitly with `--format`.
 

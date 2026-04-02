@@ -44,7 +44,7 @@ def run_pprof_subcommand(name, banner, min_files:)
   end
 
   files = ARGV.shift(min_files > 1 ? [ARGV.size, min_files].min : 1)
-  files = ["rperf.data"] if files.empty? && min_files == 1
+  files = ["rperf.marshal.gz"] if files.empty? && min_files == 1
 
   if min_files > 1 && files.size < min_files
     $stderr.puts "Two profile files required."
@@ -59,12 +59,7 @@ def run_pprof_subcommand(name, banner, min_files:)
     end
   end
 
-  unless system("go", "version", out: File::NULL, err: File::NULL)
-    $stderr.puts "'go' command not found. Install Go to use 'rperf #{name}'."
-    $stderr.puts "  https://go.dev/dl/"
-    exit 1
-  end
-
+  # Go check is deferred — only needed for pprof files, not marshal/json
   yield mode, files
 end
 
@@ -99,14 +94,67 @@ when "help"
 when "report"
   run_pprof_subcommand("report",
     "Usage: rperf report [options] [file]\n" \
-    "       Opens pprof profile in browser (default) or prints summary.\n" \
-    "       Default file: rperf.data",
+    "       Opens profile in browser (default) or prints summary.\n" \
+    "       Default file: rperf.marshal.gz\n" \
+    "       For .marshal.gz: opens rperf viewer (no Go required).\n" \
+    "       For .pb.gz: opens go tool pprof (requires Go).",
     min_files: 1) do |mode, files|
     report_file = files[0]
-    case mode
-    when :top  then exec("go", "tool", "pprof", "-top", report_file)
-    when :text then exec("go", "tool", "pprof", "-text", report_file)
-    else            exec("go", "tool", "pprof", "-http=localhost:#{find_available_port}", report_file)
+    if report_file =~ /\.(marshal|json)(\.gz)?\z/
+      # Use rperf viewer
+      require_relative "../lib/rperf"
+      require_relative "../lib/rperf/viewer"
+
+      data = Rperf.load(report_file)
+
+      case mode
+      when :top, :text
+        $stdout.puts Rperf::Text.encode(data)
+        exit
+      end
+
+      port = find_available_port
+
+      app = Rperf::Viewer.new(
+        proc { |_| [404, { "content-type" => "text/plain" }, ["Not Found"]] },
+        path: ""
+      )
+      app.add_snapshot(data)
+
+      url = "http://localhost:#{port}/"
+      $stderr.puts "Serving rperf viewer at #{url}"
+      $stderr.puts "Press Ctrl-C to stop."
+
+      # Open browser after server is ready
+      Thread.new do
+        20.times do
+          TCPSocket.new("localhost", port).close
+          break
+        rescue Errno::ECONNREFUSED
+          sleep 0.1
+        end
+        case RUBY_PLATFORM
+        when /darwin/ then system("open", url)
+        when /linux/  then system("xdg-open", url, err: File::NULL) || system("sensible-browser", url, err: File::NULL)
+        end
+      end
+
+      # Find an available Rack handler
+      require "rackup/handler"
+      handler = Rackup::Handler.default
+      handler.run(app, Port: port, Host: "localhost", Silent: true)
+      exit
+    else
+      unless system("go", "version", out: File::NULL, err: File::NULL)
+        $stderr.puts "'go' command not found. Install Go to use pprof files, or use .marshal.gz format."
+        $stderr.puts "  https://go.dev/dl/"
+        exit 1
+      end
+      case mode
+      when :top  then exec("go", "tool", "pprof", "-top", report_file)
+      when :text then exec("go", "tool", "pprof", "-text", report_file)
+      else            exec("go", "tool", "pprof", "-http=localhost:#{find_available_port}", report_file)
+      end
     end
   end
 when "diff"
@@ -115,6 +163,11 @@ when "diff"
     "       Compare two pprof profiles (shows target - base).",
     min_files: 2) do |mode, files|
     base_file, target_file = files
+    unless system("go", "version", out: File::NULL, err: File::NULL)
+      $stderr.puts "'go' command not found. Install Go to use 'rperf diff'."
+      $stderr.puts "  https://go.dev/dl/"
+      exit 1
+    end
     case mode
     when :top  then exec("go", "tool", "pprof", "-top", "-diff_base=#{base_file}", target_file)
     when :text then exec("go", "tool", "pprof", "-text", "-diff_base=#{base_file}", target_file)
@@ -129,7 +182,7 @@ else
   exit 1
 end
 
-output = (subcommand == "record") ? "rperf.data" : nil
+output = (subcommand == "record") ? "rperf.marshal.gz" : nil
 frequency = 1000
 mode = (subcommand == "record") ? "cpu" : "wall"
 format = nil
@@ -145,7 +198,7 @@ parser = OptionParser.new do |opts|
                 when "exec"   then "Usage: rperf exec [options] command [args...]"
                 end
 
-  opts.on("-o", "--output PATH", "Output file#{subcommand == 'record' ? ' (default: rperf.data)' : ' (default: none)'}") do |v|
+  opts.on("-o", "--output PATH", "Output file#{subcommand == 'record' ? ' (default: rperf.marshal.gz)' : ' (default: none)'}") do |v|
     output = v
   end
 
@@ -159,8 +212,8 @@ parser = OptionParser.new do |opts|
   end
 
   if subcommand == "record"
-    opts.on("--format FORMAT", %w[pprof collapsed text],
-            "Output format: pprof, collapsed, or text (default: auto from extension)") do |v|
+    opts.on("--format FORMAT", %w[pprof collapsed text marshal json],
+            "Output format: pprof, collapsed, text, marshal, or json (default: auto from extension)") do |v|
       format = v
     end
 

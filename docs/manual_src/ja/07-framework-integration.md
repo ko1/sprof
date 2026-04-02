@@ -123,6 +123,88 @@ end
 > [!NOTE]
 > Active Job と Sidekiq を併用する場合は、どちらか一方を選んでください。両方を使用するとラベルが重複します。Sidekiq ミドルウェアの方がより汎用的です（非 Active Job ワーカーもカバー）。
 
+## ブラウザ内ビューア
+
+`Rperf::Viewer` は、設定可能なマウントパスでインタラクティブなプロファイリング UI を提供する Rack ミドルウェアです。スナップショットをメモリに保持し、[d3-flame-graph](https://github.com/nicedoc/d3-flame-graph) を使ってブラウザ内で描画します。外部依存やビルドツールは不要です — HTML、CSS、JavaScript はすべて自己完結しています。
+
+```ruby
+require "rperf/viewer"
+```
+
+### セットアップ
+
+```ruby
+# config.ru（または Rails イニシャライザ）
+require "rperf/viewer"
+require "rperf/rack"
+
+Rperf.start(defer: true, mode: :wall, frequency: 999)
+
+use Rperf::Viewer                           # /rperf/ で UI を提供
+use Rperf::RackMiddleware                   # 各リクエストにラベルを付与
+run MyApp
+
+# 60分ごとにスナップショットを取得
+Thread.new do
+  loop do
+    sleep 60 * 60
+    Rperf::Viewer.instance&.take_snapshot!
+  end
+end
+```
+
+スナップショットが取得された後、ブラウザで `/rperf/` にアクセスしてください。
+
+### オプション
+
+| オプション | デフォルト | 説明 |
+|-----------|----------|------|
+| `path:` | `"/rperf"` | ビューアの URL プレフィックス |
+| `max_snapshots:` | `24` | メモリに保持するスナップショットの最大数（古いものから破棄） |
+
+### スナップショットの取得
+
+```ruby
+# プログラムから（コントローラ、バックグラウンドスレッド、コンソール等）
+Rperf::Viewer.instance.take_snapshot!
+
+# または事前に取得したデータを追加
+data = Rperf.snapshot(clear: true)
+Rperf::Viewer.instance.add_snapshot(data)
+```
+
+### UI タブ
+
+ビューアには 3 つのタブがあります:
+
+- **Flamegraph** — d3-flame-graph によるインタラクティブなフレームグラフ。フレームをクリックでズームイン、ルートをクリックでズームアウト。
+- **Top** — Flat（リーフ）と Cumulative（累積）の重み付けテーブル（上位 50 関数）。カラムヘッダー（Flat、Cum、Function）をクリックでソート。
+- **Tags** — 各ラベルキーについて、値ごとの重みとパーセンテージの内訳を表示。値の行をクリックすると tagfocus を設定して Flamegraph タブに遷移。
+
+### フィルタリング
+
+上部のコントロールバーに 4 つのフィルタがあります:
+
+- **tagfocus** — テキスト入力。ラベル値にマッチする正規表現を入力。Enter で適用。
+- **tagignore** — ドロップダウン + チェックボックス。チェックした項目に一致するサンプルを除外。各ラベルキーには `(none)` エントリがあり、そのキーを持たないサンプルを除外できます — `endpoint` ラベルのないバックグラウンドスレッドを除外する際に便利です。
+- **tagroot** — ラベルキーのドロップダウン + チェックボックス。チェックしたキーがフレームグラフのルートフレームとして先頭に追加されます（例: `[endpoint: GET /users]`）。
+- **tagleaf** — tagroot と同様ですが、リーフフレームとして末尾に追加されます。
+
+ラベルキーはアルファベット順にソートされます。`%` プレフィックスの VM 状態キー（`%GC`、`%GVL`）が先頭に来るため、GC や GVL の状態を leaf/root フレームとして追加しやすくなっています。
+
+### アクセス制御
+
+`Rperf::Viewer` には組み込みの認証機能はありません。フレームワークの既存の仕組みでアクセスを制限してください:
+
+```ruby
+# Rails: ルート制約（管理者のみ）
+# config/routes.rb
+require "rperf/viewer"
+constraints ->(req) { req.session[:admin] } do
+  mount Rperf::Viewer.new(nil), at: "/rperf"
+end
+```
+
 ## Rperf.profile によるオンデマンドプロファイリング
 
 特定のエンドポイントやジョブのみをプロファイルし、他の部分ではオーバーヘッドをゼロにしたい場合は、[`Rperf.start(defer: true)`](#index:Rperf.start) と [`Rperf.profile`](#index:Rperf.profile) を使用します:

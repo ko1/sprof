@@ -182,6 +182,184 @@ class TestRperfOutput < Test::Unit::TestCase
     end
   end
 
+  # --- Marshal ---
+
+  def test_marshal_save_load
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "test.marshal.gz")
+      data = Rperf.start(frequency: 500, mode: :wall) do
+        5_000_000.times { 1 + 1 }
+      end
+
+      Rperf.save(path, data)
+      loaded = Rperf.load(path)
+
+      assert_equal data[:mode], loaded[:mode]
+      assert_equal data[:frequency], loaded[:frequency]
+      assert_equal data[:aggregated_samples].size, loaded[:aggregated_samples].size
+    end
+  end
+
+  def test_marshal_output_via_start
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "test.marshal.gz")
+      Rperf.start(output: path, frequency: 500) do
+        5_000_000.times { 1 + 1 }
+      end
+
+      assert File.exist?(path)
+      content = File.binread(path)
+      assert_equal "\x1f\x8b".b, content[0, 2], "Should be gzip format"
+
+      loaded = Rperf.load(path)
+      assert_equal :cpu, loaded[:mode]
+      assert_operator loaded[:aggregated_samples].size, :>, 0
+    end
+  end
+
+  def test_marshal_format_detection
+    fmt = Rperf.send(:detect_format, "profile.marshal.gz", nil)
+    assert_equal :marshal, fmt
+
+    fmt2 = Rperf.send(:detect_format, "profile.marshal", nil)
+    assert_equal :marshal, fmt2
+  end
+
+  def test_marshal_version_embedded
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "test.marshal.gz")
+      data = Rperf.start(frequency: 500) { 1_000_000.times { 1 + 1 } }
+      Rperf.save(path, data)
+
+      # Read raw to verify version is embedded
+      raw = Zlib::GzipReader.new(StringIO.new(File.binread(path))).read
+      raw_data = Marshal.load(raw)
+      assert_equal Rperf::VERSION, raw_data[:rperf_version]
+    end
+  end
+
+  def test_marshal_version_mismatch_warning
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "test.marshal.gz")
+      # Save with a fake different version
+      fake_data = { mode: :cpu, frequency: 100, aggregated_samples: [], rperf_version: "0.0.0" }
+      io = StringIO.new
+      io.set_encoding("ASCII-8BIT")
+      gz = Zlib::GzipWriter.new(io)
+      gz.write(Marshal.dump(fake_data))
+      gz.close
+      File.binwrite(path, io.string)
+
+      old_stderr = $stderr
+      $stderr = StringIO.new
+      loaded = Rperf.load(path)
+      warning = $stderr.string
+      $stderr = old_stderr
+
+      assert_include warning, "rperf 0.0.0"
+      assert_include warning, "current: #{Rperf::VERSION}"
+      assert_equal :cpu, loaded[:mode]
+    end
+  end
+
+  def test_marshal_no_version_warning
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "test.marshal.gz")
+      # Save without version (simulating old rperf)
+      fake_data = { mode: :cpu, frequency: 100, aggregated_samples: [] }
+      io = StringIO.new
+      io.set_encoding("ASCII-8BIT")
+      gz = Zlib::GzipWriter.new(io)
+      gz.write(Marshal.dump(fake_data))
+      gz.close
+      File.binwrite(path, io.string)
+
+      old_stderr = $stderr
+      $stderr = StringIO.new
+      Rperf.load(path)
+      warning = $stderr.string
+      $stderr = old_stderr
+
+      assert_include warning, "no version info"
+    end
+  end
+
+  # --- JSON ---
+
+  def test_json_save_load
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "test.json.gz")
+      data = Rperf.start(frequency: 500, mode: :wall) do
+        5_000_000.times { 1 + 1 }
+      end
+
+      Rperf.save(path, data)
+      loaded = Rperf.load(path)
+
+      assert_equal data[:mode].to_s, loaded[:mode].to_s
+      assert_equal data[:frequency], loaded[:frequency]
+      assert_equal data[:aggregated_samples].size, loaded[:aggregated_samples].size
+    end
+  end
+
+  def test_json_format_detection
+    fmt = Rperf.send(:detect_format, "profile.json.gz", nil)
+    assert_equal :json, fmt
+
+    fmt2 = Rperf.send(:detect_format, "profile.json", nil)
+    assert_equal :json, fmt2
+  end
+
+  def test_json_version_embedded
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "test.json.gz")
+      data = Rperf.start(frequency: 500) { 1_000_000.times { 1 + 1 } }
+      Rperf.save(path, data)
+
+      raw = Zlib::GzipReader.new(StringIO.new(File.binread(path))).read
+      require "json"
+      raw_data = JSON.parse(raw)
+      assert_equal Rperf::VERSION, raw_data["rperf_version"]
+    end
+  end
+
+  # --- Format override ---
+
+  def test_format_override
+    assert_equal :pprof, Rperf.send(:detect_format, "anything", :pprof)
+    assert_equal :marshal, Rperf.send(:detect_format, "anything", :marshal)
+    assert_equal :json, Rperf.send(:detect_format, "anything", :json)
+    assert_equal :collapsed, Rperf.send(:detect_format, "anything", :collapsed)
+    assert_equal :text, Rperf.send(:detect_format, "anything", :text)
+  end
+
+  def test_format_detection_defaults_to_pprof
+    assert_equal :pprof, Rperf.send(:detect_format, "profile.pb.gz", nil)
+    assert_equal :pprof, Rperf.send(:detect_format, "profile.dat", nil)
+    assert_equal :pprof, Rperf.send(:detect_format, "unknown", nil)
+  end
+
+  # --- Save with labels preserved in marshal ---
+
+  def test_marshal_preserves_labels
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "test.marshal.gz")
+      Rperf.start(frequency: 500, mode: :wall)
+      Rperf.label(endpoint: "/users") do
+        5_000_000.times { 1 + 1 }
+      end
+      data = Rperf.stop
+
+      Rperf.save(path, data)
+      loaded = Rperf.load(path)
+
+      assert_not_nil loaded[:label_sets]
+      assert_operator loaded[:label_sets].size, :>, 1, "Should have at least one non-empty label set"
+      has_endpoint = loaded[:label_sets].any? { |ls| ls.is_a?(Hash) && ls[:endpoint] }
+      assert has_endpoint, "Should preserve endpoint label"
+    end
+  end
+
   # --- aggregate: false + output formats ---
 
   def test_no_aggregate_has_both_keys

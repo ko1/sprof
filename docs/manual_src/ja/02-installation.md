@@ -56,6 +56,6 @@ macOS では（および Linux で `signal: false` を設定した場合）、rp
 
 ## オプション: Go ツールチェーン
 
-`rperf report` と `rperf diff` サブコマンドは `go tool pprof` の薄いラッパーです。これらのコマンドを使用する場合は、[go.dev](https://go.dev/dl/) から Go をインストールしてください。
+Go は `rperf report` で pprof (`.pb.gz`) ファイルを表示する場合と、`rperf diff` サブコマンドでのみ必要です。どちらも `go tool pprof` のラッパーです。これらの機能が必要な場合は、[go.dev](https://go.dev/dl/) から Go をインストールしてください。
 
-Go がなくても、rperf の他のすべての機能は使用できます。[speedscope](https://www.speedscope.app/) などの他のツールで pprof ファイルを表示したり、テキスト/collapsed 形式で直接生成したりできます。
+Go がなくても、デフォルトの marshal (`.marshal.gz`) および JSON (`.json.gz`) 形式での `rperf report` を含む rperf のすべての機能を使用できます。これらの形式では rperf 組み込みビューアが開きます。pprof ファイルも [speedscope](https://www.speedscope.app/) などの他のツールで表示したり、テキスト/collapsed 形式で直接生成したりできます。
