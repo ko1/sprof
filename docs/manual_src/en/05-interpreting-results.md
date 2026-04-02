@@ -27,41 +27,67 @@ All weights in rperf are in **nanoseconds**, regardless of profiling mode:
 - 1,000,000 ns = 1 ms (millisecond)
 - 1,000,000,000 ns = 1 s (second)
 
-## Synthetic frames
+## VM state labels
 
-In addition to normal Ruby frames, rperf records synthetic frames that represent non-CPU activity. These always appear as the leaf (deepest) frame in a sample.
+In addition to normal Ruby frames, rperf tracks non-CPU activity as **labels** (tags) on samples. The C extension records a `vm_state` for each sample, and Ruby converts these to labels with keys `%GVL` and `%GC` before encoding. These labels appear in `label_sets` alongside user labels (like `endpoint`), and in pprof output as sample labels that can be filtered with `-tagfocus`, `-tagroot`, and `-tagleaf`.
 
-### [GVL blocked]
+### %GVL: blocked
 
 **Mode**: wall only
 
-Time the thread spent off the GVL — during I/O operations, `sleep`, or C extensions that release the [GVL](#index:GVL). This is one of the [synthetic frames](#index:synthetic frames). This time is attributed to the stack captured at the SUSPENDED event (when the thread released the GVL).
+Time the thread spent off the GVL — during I/O operations, `sleep`, or C extensions that release the [GVL](#index:GVL). This time is attributed to the stack captured at the SUSPENDED event (when the thread released the GVL).
 
-High [`[GVL blocked]`](#index:\[GVL blocked\]) time indicates your program is I/O bound. Look at the cumulative view to find which functions are triggering the I/O.
+High `%GVL: blocked` time indicates your program is I/O bound. Look at the cumulative view to find which functions are triggering the I/O.
 
-### [GVL wait]
+```bash
+# Filter to GVL-blocked samples only
+go tool pprof -tagfocus=%GVL=blocked profile.pb.gz
+```
+
+### %GVL: wait
 
 **Mode**: wall only
 
 Time the thread spent waiting to reacquire the GVL after becoming ready. This indicates GVL contention — another thread is holding the GVL while this thread wants to run.
 
-High [`[GVL wait]`](#index:\[GVL wait\]) time means your threads are serialized on the GVL. Consider reducing GVL-holding work, using Ractors, or moving work to child processes.
+High `%GVL: wait` time means your threads are serialized on the GVL. Consider reducing GVL-holding work, using Ractors, or moving work to child processes.
 
-### [GC marking]
+```bash
+# Filter to GVL-wait samples only
+go tool pprof -tagfocus=%GVL=wait profile.pb.gz
+```
+
+### %GC: mark
 
 **Mode**: cpu and wall
 
 Time spent in the GC marking phase. Always measured in wall time. Attributed to the stack that triggered GC.
 
-High [`[GC marking]`](#index:\[GC marking\]) time means too many live objects. Reduce the number of long-lived allocations.
+High `%GC: mark` time means too many live objects. Reduce the number of long-lived allocations.
 
-### [GC sweeping]
+### %GC: sweep
 
 **Mode**: cpu and wall
 
 Time spent in the GC sweeping phase. Always measured in wall time. Attributed to the stack that triggered GC.
 
-High [`[GC sweeping]`](#index:\[GC sweeping\]) time means too many short-lived objects. Consider reusing objects or using object pools.
+High `%GC: sweep` time means too many short-lived objects. Consider reusing objects or using object pools.
+
+### Filtering VM state labels in pprof
+
+```bash
+# Show only GVL-blocked time
+go tool pprof -tagfocus=%GVL=blocked profile.pb.gz
+
+# Show only GC time (both marking and sweeping)
+go tool pprof -tagfocus=%GC profile.pb.gz
+
+# Group by GVL state at flame graph root
+go tool pprof -tagroot=%GVL profile.pb.gz
+
+# Exclude GVL-blocked samples
+go tool pprof -tagignore=%GVL=blocked profile.pb.gz
+```
 
 ## Diagnosing common problems
 
@@ -79,17 +105,17 @@ Look for functions with high flat CPU time. These are the functions consuming CP
 
 Look for functions with high cumulative wall time.
 
-- If `[GVL blocked]` is dominant: I/O or sleep is the bottleneck. Check database queries, HTTP calls, file I/O.
-- If `[GVL wait]` is dominant: GVL contention. Reduce GVL-holding work or move to Ractors/child processes.
+- If `%GVL: blocked` time is dominant: I/O or sleep is the bottleneck. Check database queries, HTTP calls, file I/O.
+- If `%GVL: wait` time is dominant: GVL contention. Reduce GVL-holding work or move to Ractors/child processes.
 
 ### GC pressure
 
 **Mode**: cpu or wall
 
-Look for `[GC marking]` and `[GC sweeping]` samples.
+Look for samples with `%GC: mark` and `%GC: sweep` labels.
 
-- High `[GC marking]`: Too many live objects. Reduce allocations of long-lived objects.
-- High `[GC sweeping]`: Too many short-lived objects. Reuse or pool objects.
+- High `%GC: mark` time: Too many live objects. Reduce allocations of long-lived objects.
+- High `%GC: sweep` time: Too many short-lived objects. Reuse or pool objects.
 
 The `rperf stat` output also shows GC counts and allocated/freed object counts, which can help diagnose allocation-heavy code.
 
@@ -97,7 +123,7 @@ The `rperf stat` output also shows GC counts and allocated/freed object counts, 
 
 **Mode**: wall
 
-Look for `[GVL wait]` time across threads.
+Look for `%GVL: wait` time across threads.
 
 ```bash
 rperf stat ruby threaded_app.rb
@@ -112,9 +138,9 @@ Example output for a GVL-contended workload:
             14.0 ms   sys
             41.2 ms   real
 
-             0.5 ms   1.2%  CPU execution
-             9.8 ms  23.8%  [Ruby] GVL blocked (I/O, sleep)
-            30.8 ms  75.0%  [Ruby] GVL wait (contention)
+             0.5 ms   1.2%  [Rperf] CPU execution
+             9.8 ms  23.8%  [Rperf] GVL blocked (I/O, sleep)
+            30.8 ms  75.0%  [Rperf] GVL wait (contention)
 ```
 
 Here, 75% of wall time is GVL contention. The four threads are fighting for the GVL, serializing their CPU work.

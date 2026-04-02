@@ -36,13 +36,13 @@ rperf stat ruby fib.rb
             32.0 ms   sys
            491.0 ms   real
 
-           481.0 ms 100.0%  CPU execution
-            12.0 ms         [Ruby] GC time (9 count: 6 minor, 3 major)
-         154,468            [Ruby] allocated objects
-          66,596            [Ruby] freed objects
-              25 MB         [OS] peak memory (maxrss)
-              31            [OS] context switches (10 voluntary, 21 involuntary)
-               0 MB         [OS] disk I/O (0 MB read, 0 MB write)
+           481.0 ms 100.0%  [Rperf] CPU execution
+            12.0 ms         [Ruby ] GC time (9 count: 6 minor, 3 major)
+         154,468            [Ruby ] allocated objects
+          66,596            [Ruby ] freed objects
+              25 MB         [OS   ] peak memory (maxrss)
+              31            [OS   ] context switches (10 voluntary, 21 involuntary)
+               0 MB         [OS   ] disk I/O (0 MB read, 0 MB write)
 
   481 samples / 481 triggers, 0.1% profiler overhead
 ```
@@ -50,9 +50,9 @@ rperf stat ruby fib.rb
 The output tells you:
 
 - **user/sys/real**: Standard timing (like the `time` command)
-- **Time breakdown**: Where wall time was spent — CPU execution, GVL blocked (I/O/sleep), GVL wait (contention), GC marking, GC sweeping
-- **Ruby stats**: GC count, allocated/freed objects, YJIT ratio (if enabled)
-- **OS stats**: Peak memory, context switches, disk I/O
+- **`[Rperf]` lines**: Sampling-derived time breakdown — CPU execution, GVL blocked (I/O/sleep), GVL wait (contention), GC marking, GC sweeping
+- **`[Ruby ]` lines**: Runtime statistics — GC count, allocated/freed objects, YJIT ratio (if enabled)
+- **`[OS   ]` lines**: OS statistics — peak memory, context switches, disk I/O
 
 Use `--report` to add flat and cumulative top-50 function tables to the output.
 
@@ -82,7 +82,7 @@ Running `rperf stat`:
 rperf stat ruby mixed.rb
 ```
 
-Because `stat` always uses wall mode, you can see how time is divided between CPU and I/O. The `[Ruby] GVL blocked` line shows time spent sleeping/in I/O, while `CPU execution` shows compute time.
+Because `stat` always uses wall mode, you can see how time is divided between CPU and I/O. The `[Rperf] GVL blocked` line shows time spent sleeping/in I/O, while `[Rperf] CPU execution` shows compute time.
 
 ### stat options
 
@@ -206,11 +206,9 @@ Total: 311.8ms (wall)
 Samples: 80, Frequency: 1000Hz
 
  Flat:
-           250.6 ms  80.4%  [GVL blocked] (<GVL>)
             44.1 ms  14.1%  Object#cpu_work (mixed.rb)
             13.9 ms   4.5%  Integer#times (<internal:numeric>)
              3.2 ms   1.0%  Kernel#sleep (<C method>)
-             0.0 ms   0.0%  [GVL wait] (<GVL>)
 
  Cumulative:
            311.8 ms 100.0%  Integer#times (<internal:numeric>)
@@ -218,12 +216,14 @@ Samples: 80, Frequency: 1000Hz
            311.8 ms 100.0%  <main> (mixed.rb)
            253.8 ms  81.4%  Kernel#sleep (<C method>)
            253.8 ms  81.4%  Object#io_work (mixed.rb)
-           250.6 ms  80.4%  [GVL blocked] (<GVL>)
             58.0 ms  18.6%  Object#cpu_work (mixed.rb)
-             0.0 ms   0.0%  [GVL wait] (<GVL>)
+
+ Labels:
+           250.6 ms  80.4%  %GVL: blocked
+             0.0 ms   0.0%  %GVL: wait
 ```
 
-In wall mode, `[GVL blocked]` appears as the dominant cost — this is the sleep time in `io_work`. The CPU time for `cpu_work` is clearly separated.
+In wall mode, the `%GVL: blocked` label accounts for the dominant cost — this is the sleep time in `io_work`. The CPU time for `cpu_work` is clearly separated. GVL and GC activity appear as labels on samples rather than as stack frames, and can be filtered with pprof's `-tagfocus` flag (e.g., `-tagfocus=%GVL=blocked`).
 
 ### Verbose output
 
@@ -334,7 +334,7 @@ rperf diff before.pb.gz after.pb.gz
 
 ## rperf help
 
-`rperf help` prints the full reference documentation, including profiling modes, output formats, synthetic frames, and diagnostic tips.
+`rperf help` prints the full reference documentation, including profiling modes, output formats, VM state labels, and diagnostic tips.
 
 ```bash
 rperf help

@@ -111,7 +111,9 @@ data = Rperf.stop
     ...
   ],
 
-  label_sets: [{}, {request: "abc"}],     # ラベルセットテーブル（ラベル使用時に存在）
+  label_sets: [{}, {request: "abc"},       # ラベルセットテーブル（ラベル使用時に存在）
+              {"%GVL" => "blocked"},       # VM 状態ラベルも含まれる
+              {request: "abc", "%GC" => "mark"}],
 }
 ```
 
@@ -122,6 +124,8 @@ data = Rperf.stop
 - **label_set_id**: ラベルセット ID（0 = ラベルなし）。`label_sets` 配列へのインデックス
 
 `aggregate: true`（デフォルト）の場合、同一スタックはマージされ、重みが合計されます。`aggregated_samples` 配列にはユニークな `(stack, thread_seq, label_set_id)` の組み合わせごとに 1 エントリが含まれます。`aggregate: false` の場合、C 拡張は個々のタイマーサンプルすべてを `raw_samples` として返します。Ruby の `Rperf.stop` はエンコーダーが常に動作するように `aggregated_samples` も構築します。
+
+GVL/GC の状態は `label_sets` にラベルとして格納されます。C 拡張は内部的に `vm_state` として記録しますが、`Rperf.stop` が `merge_vm_state_labels!` で `%GVL`/`%GC` ラベルに変換してから返します。例えば、GVL ブロック中のサンプルの `label_sets` エントリには `{"%GVL" => "blocked"}` が含まれます。ユーザーラベルと VM 状態ラベルは同じ `label_sets` で管理されるため、`{request: "abc", "%GVL" => "blocked"}` のように組み合わせて使用できます。
 
 ## Rperf.save
 
@@ -380,7 +384,7 @@ wall_data = Rperf.start(mode: :wall) { workload }
 Rperf.save("wall.txt", wall_data)
 ```
 
-CPU プロファイルは `compute_something` に集中し、wall プロファイルは `sleep` 呼び出しを `[GVL blocked]` 時間として表示します。
+CPU プロファイルは `compute_something` に集中し、wall プロファイルは `sleep` 呼び出しを `%GVL=blocked` ラベル付きのサンプルとして表示します。
 
 ### サンプルの処理
 

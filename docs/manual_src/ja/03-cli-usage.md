@@ -36,13 +36,13 @@ rperf stat ruby fib.rb
             32.0 ms   sys
            491.0 ms   real
 
-           481.0 ms 100.0%  CPU execution
-            12.0 ms         [Ruby] GC time (9 count: 6 minor, 3 major)
-         154,468            [Ruby] allocated objects
-          66,596            [Ruby] freed objects
-              25 MB         [OS] peak memory (maxrss)
-              31            [OS] context switches (10 voluntary, 21 involuntary)
-               0 MB         [OS] disk I/O (0 MB read, 0 MB write)
+           481.0 ms 100.0%  [Rperf] CPU execution
+            12.0 ms         [Ruby ] GC time (9 count: 6 minor, 3 major)
+         154,468            [Ruby ] allocated objects
+          66,596            [Ruby ] freed objects
+              25 MB         [OS   ] peak memory (maxrss)
+              31            [OS   ] context switches (10 voluntary, 21 involuntary)
+               0 MB         [OS   ] disk I/O (0 MB read, 0 MB write)
 
   481 samples / 481 triggers, 0.1% profiler overhead
 ```
@@ -50,9 +50,9 @@ rperf stat ruby fib.rb
 出力の意味:
 
 - **user/sys/real**: 標準的な時間計測（`time` コマンドと同様）
-- **時間の内訳**: wall time がどこで費やされたか — CPU 実行、GVL ブロック（I/O/sleep）、GVL 待ち（競合）、GC marking、GC sweeping
-- **Ruby の統計**: GC 回数、割り当て済み/解放済みオブジェクト、YJIT 比率（有効な場合）
-- **OS の統計**: ピークメモリ、コンテキストスイッチ、ディスク I/O
+- **時間の内訳**: `[Rperf]` プレフィックスの行はサンプリングから導出された時間内訳を示します — CPU 実行、GVL ブロック（I/O/sleep）、GVL 待ち（競合）、GC marking、GC sweeping
+- **Ruby の統計**: `[Ruby ]` プレフィックスの行は Ruby ランタイム情報を示します — GC 回数、割り当て済み/解放済みオブジェクト、YJIT 比率（有効な場合）
+- **OS の統計**: `[OS   ]` プレフィックスの行は OS レベルの統計を示します — ピークメモリ、コンテキストスイッチ、ディスク I/O
 
 `--report` を使用すると、フラットおよびキュムレイティブな上位 50 関数テーブルが出力に追加されます。
 
@@ -82,7 +82,7 @@ end
 rperf stat ruby mixed.rb
 ```
 
-`stat` は常に wall モードを使用するため、CPU と I/O の間の時間配分が確認できます。`[Ruby] GVL blocked` の行は sleep/I/O に費やされた時間を示し、`CPU execution` は計算時間を示します。
+`stat` は常に wall モードを使用するため、CPU と I/O の間の時間配分が確認できます。`[Rperf] GVL blocked` の行は sleep/I/O に費やされた時間を示し、`CPU execution` は計算時間を示します。
 
 ### stat のオプション
 
@@ -206,11 +206,9 @@ Total: 311.8ms (wall)
 Samples: 80, Frequency: 1000Hz
 
  Flat:
-           250.6 ms  80.4%  [GVL blocked] (<GVL>)
             44.1 ms  14.1%  Object#cpu_work (mixed.rb)
             13.9 ms   4.5%  Integer#times (<internal:numeric>)
              3.2 ms   1.0%  Kernel#sleep (<C method>)
-             0.0 ms   0.0%  [GVL wait] (<GVL>)
 
  Cumulative:
            311.8 ms 100.0%  Integer#times (<internal:numeric>)
@@ -218,12 +216,10 @@ Samples: 80, Frequency: 1000Hz
            311.8 ms 100.0%  <main> (mixed.rb)
            253.8 ms  81.4%  Kernel#sleep (<C method>)
            253.8 ms  81.4%  Object#io_work (mixed.rb)
-           250.6 ms  80.4%  [GVL blocked] (<GVL>)
             58.0 ms  18.6%  Object#cpu_work (mixed.rb)
-             0.0 ms   0.0%  [GVL wait] (<GVL>)
 ```
 
-wall モードでは、`[GVL blocked]` が支配的なコストとして表示されます。これは `io_work` 内の sleep 時間です。`cpu_work` の CPU 時間は明確に分離されています。
+wall モードでは、GVL ブロック時間や GVL 待ち時間はフレームとしてではなく、サンプルのラベル（`%GVL=blocked`、`%GVL=wait`）として記録されます。pprof で `-tagfocus=%GVL=blocked` を使うことで、I/O 待ちのサンプルだけをフィルタリングして分析できます。
 
 ### Verbose 出力
 
@@ -334,7 +330,7 @@ rperf diff before.pb.gz after.pb.gz
 
 ## rperf help
 
-`rperf help` はプロファイリングモード、出力形式、合成フレーム、診断のヒントを含む完全なリファレンスドキュメントを出力します。
+`rperf help` はプロファイリングモード、出力形式、VM 状態ラベル、診断のヒントを含む完全なリファレンスドキュメントを出力します。
 
 ```bash
 rperf help

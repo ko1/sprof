@@ -7,8 +7,10 @@
 `Rperf.stop` が呼び出されると、C 拡張は集約データを Ruby に返します:
 
 1. **フレームテーブル**: フレーム ID でインデックスされた `[path, label]` 文字列ペアの配列。文字列は `rb_profile_frame_full_label` と `rb_profile_frame_path` を通じて生の VALUE から解決されます。
-2. **集約テーブル**: `[frame_ids, weight, thread_seq, label_set_id]` エントリの配列。
+2. **集約テーブル**: `[frame_ids, weight, thread_seq, label_set_id, vm_state]` エントリの配列。
 3. **ラベルセット**: ラベルキーと値のマッピングを持つ frozen Hash の配列。
+
+Ruby の `Rperf.stop` は `merge_vm_state_labels!` を呼び出して、各サンプルの `vm_state` を `%GVL`/`%GC` ラベルに変換し、既存の `label_sets` にマージします。例えば、`vm_state=GVL_BLOCKED` は `%GVL: "blocked"` ラベルになります。これにより、VM 状態がユーザーラベル（`endpoint` など）と同じ仕組みで pprof のサンプルラベルに書き込まれます。
 
 Ruby エンコーダー（`Rperf::PProf`、`Rperf::Collapsed`、`Rperf::Text`）がこれらの配列を消費して最終出力を生成します。
 

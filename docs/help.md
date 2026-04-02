@@ -40,6 +40,8 @@ Uses wall mode by default. No file output by default.
 
 Shows: user/sys/real time, time breakdown (CPU execution, GVL blocked,
 GVL wait, GC marking, GC sweeping), GC/memory/OS stats, and profiler overhead.
+Lines are prefixed: `[Rperf]` for sampling-derived data, `[Ruby ]` for
+runtime info, `[OS   ]` for OS-level info.
 Use --report to add flat and cumulative top-50 function tables.
 
 ### exec: Run command and print full profile report to stderr.
@@ -293,7 +295,7 @@ end
 - **wall** — Measures wall-clock time (CLOCK_MONOTONIC).
   Use for: finding where wall time goes, including I/O, sleep, GVL
   contention, and off-CPU waits.
-  Includes synthetic frames (see below).
+  Includes VM state labels (see below).
 
 ## OUTPUT FORMATS
 
@@ -364,21 +366,37 @@ Format is auto-detected from the output file extension:
 
 The `--format` flag (CLI) or `format:` parameter (API) overrides auto-detect.
 
-## SYNTHETIC FRAMES
+## VM STATE LABELS
 
-In wall mode, rperf adds synthetic frames that represent non-CPU time:
+rperf tracks GVL and GC states as **labels** (tags) on samples, not as
+stack frames. The C extension records a VM state per sample, and the Ruby
+layer merges it into the sample's label set using reserved keys `%GVL`
+and `%GC`.
 
-- **[GVL blocked]** — Time the thread spent off-GVL (I/O, sleep, C extension
+In wall mode, GVL state labels are recorded:
+
+- **%GVL=blocked** — The thread was off-GVL (I/O, sleep, C extension
   releasing GVL). Attributed to the stack at SUSPENDED.
-- **[GVL wait]** — Time the thread spent waiting to reacquire the GVL after
+- **%GVL=wait** — The thread was waiting to reacquire the GVL after
   becoming ready. Indicates GVL contention. Same stack.
 
-In both modes, GC time is tracked:
+In both modes, GC state labels are recorded:
 
-- **[GC marking]** — Time spent in GC marking phase (wall time).
-- **[GC sweeping]** — Time spent in GC sweeping phase (wall time).
+- **%GC=mark** — Time spent in GC marking phase (wall time).
+- **%GC=sweep** — Time spent in GC sweeping phase (wall time).
 
-These always appear as the leaf (deepest) frame in a sample.
+These labels appear in `label_sets` (e.g., `{"%GVL" => "blocked"}`,
+`{"%GC" => "mark"}`) and are written into pprof sample labels.
+
+To add VM state as frames in flamegraphs, use pprof tag options:
+
+    go tool pprof -tagleaf=%GVL profile.pb.gz
+    go tool pprof -tagroot=%GC profile.pb.gz
+
+To filter by VM state:
+
+    go tool pprof -tagfocus=%GVL=blocked profile.pb.gz
+    go tool pprof -tagfocus=%GC=mark profile.pb.gz
 
 ## INTERPRETING RESULTS
 
@@ -403,20 +421,24 @@ To convert: 1,000,000 ns = 1 ms, 1,000,000,000 ns = 1 s.
 **Problem: slow request / high latency**
 - Mode: wall
 - Look for: functions with high cum wall time.
-- If [GVL blocked] is dominant → I/O or sleep is the bottleneck.
-- If [GVL wait] is dominant → GVL contention; reduce GVL-holding work
+- If %GVL=blocked is dominant → I/O or sleep is the bottleneck.
+  Filter: `go tool pprof -tagfocus=%GVL=blocked profile.pb.gz`
+- If %GVL=wait is dominant → GVL contention; reduce GVL-holding work
   or move work to Ractors / child processes.
+  Filter: `go tool pprof -tagfocus=%GVL=wait profile.pb.gz`
 
 **Problem: GC pauses**
 - Mode: cpu or wall
-- Look for: [GC marking] and [GC sweeping] samples.
-- High [GC marking] → too many live objects; reduce allocations.
-- High [GC sweeping] → too many short-lived objects; reuse or pool.
+- Look for: samples with %GC=mark and %GC=sweep labels.
+  Filter: `go tool pprof -tagfocus=%GC profile.pb.gz`
+- High %GC=mark → too many live objects; reduce allocations.
+- High %GC=sweep → too many short-lived objects; reuse or pool.
 
 **Problem: multithreaded app slower than expected**
 - Mode: wall
-- Look for: [GVL wait] time across threads.
-- High [GVL wait] means threads are serialized on the GVL.
+- Look for: samples with %GVL=wait label across threads.
+  Filter: `go tool pprof -tagfocus=%GVL=wait profile.pb.gz`
+- High %GVL=wait means threads are serialized on the GVL.
 
 ## READING COLLAPSED STACKS PROGRAMMATICALLY
 

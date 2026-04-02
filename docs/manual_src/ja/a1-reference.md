@@ -120,10 +120,10 @@ end
 | 項目 | cpu | wall |
 |--------|-----|------|
 | クロック | `CLOCK_THREAD_CPUTIME_ID` | `CLOCK_MONOTONIC` |
-| I/O 時間 | 計測されない | `[GVL blocked]` |
-| Sleep 時間 | 計測されない | `[GVL blocked]` |
-| GVL 競合 | 計測されない | `[GVL wait]` |
-| GC 時間 | `[GC marking]`, `[GC sweeping]` | `[GC marking]`, `[GC sweeping]` |
+| I/O 時間 | 計測されない | `%GVL=blocked` ラベル |
+| Sleep 時間 | 計測されない | `%GVL=blocked` ラベル |
+| GVL 競合 | 計測されない | `%GVL=wait` ラベル |
+| GC 時間 | `%GC=mark`, `%GC=sweep` ラベル | `%GC=mark`, `%GC=sweep` ラベル |
 | 適したケース | CPU ホットスポット | レイテンシ分析 |
 
 ## 出力形式の比較
@@ -134,11 +134,13 @@ end
 | `.collapsed` | Collapsed stacks | flamegraph.pl or speedscope |
 | `.txt` | テキストレポート | なし |
 
-## 合成フレーム
+## VM 状態ラベル
 
-| フレーム | モード | 意味 |
+| ラベル | モード | 意味 |
 |-------|------|---------|
-| `[GVL blocked]` | wall | スレッドが GVL 外（I/O, sleep, C 拡張） |
-| `[GVL wait]` | wall | スレッドが GVL 待ち（競合） |
-| `[GC marking]` | 両方 | GC marking フェーズ（wall time） |
-| `[GC sweeping]` | 両方 | GC sweeping フェーズ（wall time） |
+| `%GVL=blocked` | wall | スレッドが GVL 外（I/O, sleep, C 拡張） |
+| `%GVL=wait` | wall | スレッドが GVL 待ち（競合） |
+| `%GC=mark` | 両方 | GC marking フェーズ（wall time） |
+| `%GC=sweep` | 両方 | GC sweeping フェーズ（wall time） |
+
+これらはサンプルのラベルとして `label_sets` に格納されます。pprof で `-tagfocus=%GVL=blocked` のようにフィルタリングできます。

@@ -39,22 +39,17 @@
 #define RPERF_STACK_POOL_INITIAL 4096
 #define RPERF_PAUSED(prof) ((prof)->profile_refcount == 0)
 
-/* Synthetic frame IDs (reserved in frame_table, 0-based) */
-#define RPERF_SYNTHETIC_GVL_BLOCKED 0
-#define RPERF_SYNTHETIC_GVL_WAIT    1
-#define RPERF_SYNTHETIC_GC_MARKING  2
-#define RPERF_SYNTHETIC_GC_SWEEPING 3
-#define RPERF_SYNTHETIC_COUNT       4
+/* VM state values (stored in samples, not as stack frames) */
+enum rperf_vm_state {
+    RPERF_VM_STATE_NORMAL       = 0,
+    RPERF_VM_STATE_GVL_BLOCKED  = 1,
+    RPERF_VM_STATE_GVL_WAIT     = 2,
+    RPERF_VM_STATE_GC_MARKING   = 3,
+    RPERF_VM_STATE_GC_SWEEPING  = 4,
+};
 
 /* ---- Data structures ---- */
 
-enum rperf_sample_type {
-    RPERF_SAMPLE_NORMAL      = 0,
-    RPERF_SAMPLE_GVL_BLOCKED = 1,  /* off-GVL: SUSPENDED → READY */
-    RPERF_SAMPLE_GVL_WAIT    = 2,  /* GVL wait: READY → RESUMED */
-    RPERF_SAMPLE_GC_MARKING  = 3,  /* GC marking phase */
-    RPERF_SAMPLE_GC_SWEEPING = 4,  /* GC sweeping phase */
-};
 
 enum rperf_gc_phase {
     RPERF_GC_NONE     = 0,
@@ -66,7 +61,7 @@ typedef struct rperf_sample {
     int depth;
     size_t frame_start; /* index into frame_pool */
     int64_t weight;
-    int type;           /* rperf_sample_type */
+    enum rperf_vm_state vm_state;
     int thread_seq;     /* thread sequence number (1-based) */
     int label_set_id;   /* label set ID (0 = no labels) */
 } rperf_sample_t;
@@ -88,7 +83,7 @@ typedef struct rperf_sample_buffer {
 
 typedef struct rperf_frame_table {
     _Atomic(VALUE *) keys;    /* unique VALUE array (GC mark target) */
-    size_t count;             /* = next frame_id (starts after RPERF_SYNTHETIC_COUNT) */
+    size_t count;             /* = next frame_id */
     size_t capacity;
     uint32_t *buckets;        /* open addressing: stores index into keys[] */
     size_t bucket_capacity;
@@ -104,9 +99,10 @@ typedef struct rperf_frame_table {
 
 typedef struct rperf_agg_entry {
     uint32_t frame_start;     /* offset into stack_pool */
-    int depth;                /* includes synthetic frame */
+    int depth;
     int thread_seq;
     int label_set_id;         /* label set ID (0 = no labels) */
+    enum rperf_vm_state vm_state;
     int64_t weight;           /* accumulated */
     uint32_t hash;            /* cached hash value */
     int used;                 /* 0 = empty, 1 = used */
@@ -223,8 +219,7 @@ rperf_profiler_mark(void *ptr)
         size_t ft_count = __atomic_load_n(&prof->frame_table.count, __ATOMIC_ACQUIRE);
         VALUE *ft_keys = atomic_load_explicit(&prof->frame_table.keys, memory_order_acquire);
         if (ft_keys && ft_count > 0) {
-            rb_gc_mark_locations(ft_keys + RPERF_SYNTHETIC_COUNT,
-                                ft_keys + ft_count);
+            rb_gc_mark_locations(ft_keys, ft_keys + ft_count);
         }
     }
 }
@@ -342,7 +337,7 @@ rperf_frame_table_init(rperf_frame_table_t *ft)
     VALUE *keys = (VALUE *)calloc(ft->capacity, sizeof(VALUE));
     if (!keys) return -1;
     atomic_store_explicit(&ft->keys, keys, memory_order_relaxed);
-    ft->count = RPERF_SYNTHETIC_COUNT; /* reserve slots for synthetic frames */
+    ft->count = 0;
     ft->bucket_capacity = RPERF_FRAME_TABLE_INITIAL * 2;
     ft->buckets = (uint32_t *)malloc(ft->bucket_capacity * sizeof(uint32_t));
     if (!ft->buckets) { free(keys); atomic_store_explicit(&ft->keys, NULL, memory_order_relaxed); return -1; }
@@ -381,7 +376,7 @@ rperf_frame_table_rehash(rperf_frame_table_t *ft)
 
     VALUE *keys = atomic_load_explicit(&ft->keys, memory_order_relaxed);
     size_t i;
-    for (i = RPERF_SYNTHETIC_COUNT; i < ft->count; i++) {
+    for (i = 0; i < ft->count; i++) {
         uint32_t h = (uint32_t)(keys[i] >> 3); /* shift out tag bits */
         size_t idx = h % new_cap;
         while (new_buckets[idx] != RPERF_FRAME_TABLE_EMPTY)
@@ -450,7 +445,7 @@ rperf_frame_table_insert(rperf_frame_table_t *ft, VALUE fval)
 /* ---- Aggregation table operations (all malloc-based, no GVL needed) ---- */
 
 static uint32_t
-rperf_fnv1a_u32(const uint32_t *data, int len, int thread_seq, int label_set_id)
+rperf_fnv1a_u32(const uint32_t *data, int len, int thread_seq, int label_set_id, enum rperf_vm_state vm_state)
 {
     uint32_t h = 2166136261u;
     int i;
@@ -461,6 +456,8 @@ rperf_fnv1a_u32(const uint32_t *data, int len, int thread_seq, int label_set_id)
     h ^= (uint32_t)thread_seq;
     h *= 16777619u;
     h ^= (uint32_t)label_set_id;
+    h *= 16777619u;
+    h ^= (uint32_t)vm_state;
     h *= 16777619u;
     return h;
 }
@@ -528,7 +525,7 @@ rperf_agg_ensure_stack_pool(rperf_agg_table_t *at, int needed)
 static void
 rperf_agg_table_insert(rperf_agg_table_t *at, const uint32_t *frame_ids,
                        int depth, int thread_seq, int label_set_id,
-                       int64_t weight, uint32_t hash)
+                       enum rperf_vm_state vm_state, int64_t weight, uint32_t hash)
 {
     size_t idx = hash % at->bucket_capacity;
 
@@ -536,7 +533,7 @@ rperf_agg_table_insert(rperf_agg_table_t *at, const uint32_t *frame_ids,
         rperf_agg_entry_t *e = &at->buckets[idx];
         if (!e->used) break;
         if (e->hash == hash && e->depth == depth && e->thread_seq == thread_seq &&
-            e->label_set_id == label_set_id &&
+            e->label_set_id == label_set_id && e->vm_state == vm_state &&
             memcmp(at->stack_pool + e->frame_start, frame_ids,
                    depth * sizeof(uint32_t)) == 0) {
             /* Match — merge weight */
@@ -554,6 +551,7 @@ rperf_agg_table_insert(rperf_agg_table_t *at, const uint32_t *frame_ids,
     e->depth = depth;
     e->thread_seq = thread_seq;
     e->label_set_id = label_set_id;
+    e->vm_state = vm_state;
     e->weight = weight;
     e->hash = hash;
     e->used = 1;
@@ -575,24 +573,12 @@ static void
 rperf_aggregate_buffer(rperf_profiler_t *prof, rperf_sample_buffer_t *buf)
 {
     size_t i;
-    uint32_t temp_ids[RPERF_MAX_STACK_DEPTH + 1];
+    uint32_t temp_ids[RPERF_MAX_STACK_DEPTH];
 
     for (i = 0; i < buf->sample_count; i++) {
         rperf_sample_t *s = &buf->samples[i];
-        int off = 0;
         uint32_t hash;
         int j;
-
-        /* Prepend synthetic frame if needed */
-        if (s->type == RPERF_SAMPLE_GVL_BLOCKED) {
-            temp_ids[off++] = RPERF_SYNTHETIC_GVL_BLOCKED;
-        } else if (s->type == RPERF_SAMPLE_GVL_WAIT) {
-            temp_ids[off++] = RPERF_SYNTHETIC_GVL_WAIT;
-        } else if (s->type == RPERF_SAMPLE_GC_MARKING) {
-            temp_ids[off++] = RPERF_SYNTHETIC_GC_MARKING;
-        } else if (s->type == RPERF_SAMPLE_GC_SWEEPING) {
-            temp_ids[off++] = RPERF_SYNTHETIC_GC_SWEEPING;
-        }
 
         /* Convert VALUE frames to frame_ids */
         int overflow = 0;
@@ -600,15 +586,15 @@ rperf_aggregate_buffer(rperf_profiler_t *prof, rperf_sample_buffer_t *buf)
             VALUE fval = buf->frame_pool[s->frame_start + j];
             uint32_t fid = rperf_frame_table_insert(&prof->frame_table, fval);
             if (fid == RPERF_FRAME_TABLE_EMPTY) { overflow = 1; break; }
-            temp_ids[off + j] = fid;
+            temp_ids[j] = fid;
         }
         if (overflow) break; /* frame_table full, stop aggregating this buffer */
 
-        int total_depth = off + s->depth;
-        hash = rperf_fnv1a_u32(temp_ids, total_depth, s->thread_seq, s->label_set_id);
+        hash = rperf_fnv1a_u32(temp_ids, s->depth, s->thread_seq, s->label_set_id, s->vm_state);
 
-        rperf_agg_table_insert(&prof->agg_table, temp_ids, total_depth,
-                               s->thread_seq, s->label_set_id, s->weight, hash);
+        rperf_agg_table_insert(&prof->agg_table, temp_ids, s->depth,
+                               s->thread_seq, s->label_set_id, s->vm_state,
+                               s->weight, hash);
     }
 
     /* Reset buffer for reuse.
@@ -658,7 +644,7 @@ rperf_try_swap(rperf_profiler_t *prof)
 /* Write a sample into a specific buffer. No swap check. */
 static int
 rperf_write_sample(rperf_sample_buffer_t *buf, size_t frame_start, int depth,
-                   int64_t weight, int type, int thread_seq, int label_set_id)
+                   int64_t weight, enum rperf_vm_state vm_state, int thread_seq, int label_set_id)
 {
     if (weight <= 0) return 0;
     if (rperf_ensure_sample_capacity(buf) < 0) return -1;
@@ -667,7 +653,7 @@ rperf_write_sample(rperf_sample_buffer_t *buf, size_t frame_start, int depth,
     sample->depth = depth;
     sample->frame_start = frame_start;
     sample->weight = weight;
-    sample->type = type;
+    sample->vm_state = vm_state;
     sample->thread_seq = thread_seq;
     sample->label_set_id = label_set_id;
     buf->sample_count++;
@@ -676,10 +662,10 @@ rperf_write_sample(rperf_sample_buffer_t *buf, size_t frame_start, int depth,
 
 static void
 rperf_record_sample(rperf_profiler_t *prof, size_t frame_start, int depth,
-                    int64_t weight, int type, int thread_seq, int label_set_id)
+                    int64_t weight, enum rperf_vm_state vm_state, int thread_seq, int label_set_id)
 {
     rperf_sample_buffer_t *buf = &prof->buffers[atomic_load_explicit(&prof->active_idx, memory_order_relaxed)];
-    rperf_write_sample(buf, frame_start, depth, weight, type, thread_seq, label_set_id);
+    rperf_write_sample(buf, frame_start, depth, weight, vm_state, thread_seq, label_set_id);
     rperf_try_swap(prof);
 }
 
@@ -729,7 +715,7 @@ rperf_handle_suspended(rperf_profiler_t *prof, VALUE thread, rperf_thread_data_t
     /* Record normal sample (skip if first time — no prev_time, or if paused) */
     if (!is_first && !RPERF_PAUSED(prof)) {
         int64_t weight = time_now - td->prev_time_ns;
-        rperf_record_sample(prof, frame_start, depth, weight, RPERF_SAMPLE_NORMAL, td->thread_seq, td->label_set_id);
+        rperf_record_sample(prof, frame_start, depth, weight, RPERF_VM_STATE_NORMAL, td->thread_seq, td->label_set_id);
     }
 
     /* Save timestamp for READY/RESUMED */
@@ -779,12 +765,12 @@ rperf_handle_resumed(rperf_profiler_t *prof, VALUE thread, rperf_thread_data_t *
         if (td->ready_at_ns > 0 && td->ready_at_ns > td->suspended_at_ns) {
             int64_t blocked_ns = td->ready_at_ns - td->suspended_at_ns;
             rperf_write_sample(buf, frame_start, depth, blocked_ns,
-                               RPERF_SAMPLE_GVL_BLOCKED, td->thread_seq, td->label_set_id);
+                               RPERF_VM_STATE_GVL_BLOCKED, td->thread_seq, td->label_set_id);
         }
         if (td->ready_at_ns > 0 && wall_now > td->ready_at_ns) {
             int64_t wait_ns = wall_now - td->ready_at_ns;
             rperf_write_sample(buf, frame_start, depth, wait_ns,
-                               RPERF_SAMPLE_GVL_WAIT, td->thread_seq, td->label_set_id);
+                               RPERF_VM_STATE_GVL_WAIT, td->thread_seq, td->label_set_id);
         }
 
         rperf_try_swap(prof);
@@ -863,9 +849,9 @@ rperf_gc_event_hook(rb_event_flag_t event, VALUE data, VALUE self, ID id, VALUE 
 
         int64_t wall_now = rperf_wall_time_ns();
         int64_t weight = wall_now - prof->gc.enter_ns;
-        int type = (prof->gc.phase == RPERF_GC_SWEEPING)
-                   ? RPERF_SAMPLE_GC_SWEEPING
-                   : RPERF_SAMPLE_GC_MARKING;
+        enum rperf_vm_state vm_state = (prof->gc.phase == RPERF_GC_SWEEPING)
+                   ? RPERF_VM_STATE_GC_SWEEPING
+                   : RPERF_VM_STATE_GC_MARKING;
 
         /* Capture backtrace here (not at GC_ENTER) so that frame_start
          * always indexes into the current active buffer. The Ruby stack
@@ -884,7 +870,7 @@ rperf_gc_event_hook(rb_event_flag_t event, VALUE data, VALUE self, ID id, VALUE 
         }
         buf->frame_pool_count += depth;
 
-        rperf_record_sample(prof, frame_start, depth, weight, type, prof->gc.thread_seq, prof->gc.label_set_id);
+        rperf_record_sample(prof, frame_start, depth, weight, vm_state, prof->gc.thread_seq, prof->gc.label_set_id);
         prof->gc.enter_ns = 0;
     }
 }
@@ -932,7 +918,7 @@ rperf_sample_job(void *arg)
     if (depth <= 0) return;
     buf->frame_pool_count += depth;
 
-    rperf_record_sample(prof, frame_start, depth, weight, RPERF_SAMPLE_NORMAL, td->thread_seq, td->label_set_id);
+    rperf_record_sample(prof, frame_start, depth, weight, RPERF_VM_STATE_NORMAL, td->thread_seq, td->label_set_id);
 
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts_end);
     prof->stats.sampling_count++;
@@ -1079,7 +1065,7 @@ rperf_build_aggregated_result(rperf_profiler_t *prof)
     rb_hash_aset(result, ID2SYM(rb_intern("sampling_time_ns")), LONG2NUM(prof->stats.sampling_total_ns));
     rb_hash_aset(result, ID2SYM(rb_intern("detected_thread_count")), INT2NUM(prof->next_thread_seq));
     rb_hash_aset(result, ID2SYM(rb_intern("unique_frames")),
-                 SIZET2NUM(prof->frame_table.count - RPERF_SYNTHETIC_COUNT));
+                 SIZET2NUM(prof->frame_table.count));
     rb_hash_aset(result, ID2SYM(rb_intern("unique_stacks")),
                  SIZET2NUM(prof->agg_table.count));
 
@@ -1098,11 +1084,7 @@ rperf_build_aggregated_result(rperf_profiler_t *prof)
     {
         rperf_frame_table_t *ft = &prof->frame_table;
         VALUE resolved_ary = rb_ary_new_capa((long)ft->count);
-        rb_ary_push(resolved_ary, rb_ary_new3(2, rb_str_new_lit("<GVL>"), rb_str_new_lit("[GVL blocked]")));
-        rb_ary_push(resolved_ary, rb_ary_new3(2, rb_str_new_lit("<GVL>"), rb_str_new_lit("[GVL wait]")));
-        rb_ary_push(resolved_ary, rb_ary_new3(2, rb_str_new_lit("<GC>"),  rb_str_new_lit("[GC marking]")));
-        rb_ary_push(resolved_ary, rb_ary_new3(2, rb_str_new_lit("<GC>"),  rb_str_new_lit("[GC sweeping]")));
-        for (i = RPERF_SYNTHETIC_COUNT; i < ft->count; i++) {
+        for (i = 0; i < ft->count; i++) {
             rb_ary_push(resolved_ary, rperf_resolve_frame(atomic_load_explicit(&ft->keys, memory_order_relaxed)[i]));
         }
 
@@ -1118,7 +1100,12 @@ rperf_build_aggregated_result(rperf_profiler_t *prof)
                 rb_ary_push(frames, RARRAY_AREF(resolved_ary, fid));
             }
 
-            VALUE sample = rb_ary_new3(4, frames, LONG2NUM(e->weight), INT2NUM(e->thread_seq), INT2NUM(e->label_set_id));
+            VALUE sample = rb_ary_new_capa(5);
+            rb_ary_push(sample, frames);
+            rb_ary_push(sample, LONG2NUM(e->weight));
+            rb_ary_push(sample, INT2NUM(e->thread_seq));
+            rb_ary_push(sample, INT2NUM(e->label_set_id));
+            rb_ary_push(sample, INT2NUM(e->vm_state));
             rb_ary_push(samples_ary, sample);
         }
     }
@@ -1446,29 +1433,19 @@ rb_rperf_stop(VALUE self)
         samples_ary = rb_ary_new_capa((long)buf->sample_count);
         for (i = 0; i < buf->sample_count; i++) {
             rperf_sample_t *s = &buf->samples[i];
-            VALUE frames = rb_ary_new_capa(s->depth + 1);
-
-            /* Prepend synthetic frame at leaf position (index 0) */
-            if (s->type == RPERF_SAMPLE_GVL_BLOCKED) {
-                VALUE syn = rb_ary_new3(2, rb_str_new_lit("<GVL>"), rb_str_new_lit("[GVL blocked]"));
-                rb_ary_push(frames, syn);
-            } else if (s->type == RPERF_SAMPLE_GVL_WAIT) {
-                VALUE syn = rb_ary_new3(2, rb_str_new_lit("<GVL>"), rb_str_new_lit("[GVL wait]"));
-                rb_ary_push(frames, syn);
-            } else if (s->type == RPERF_SAMPLE_GC_MARKING) {
-                VALUE syn = rb_ary_new3(2, rb_str_new_lit("<GC>"), rb_str_new_lit("[GC marking]"));
-                rb_ary_push(frames, syn);
-            } else if (s->type == RPERF_SAMPLE_GC_SWEEPING) {
-                VALUE syn = rb_ary_new3(2, rb_str_new_lit("<GC>"), rb_str_new_lit("[GC sweeping]"));
-                rb_ary_push(frames, syn);
-            }
+            VALUE frames = rb_ary_new_capa(s->depth);
 
             for (j = 0; j < s->depth; j++) {
                 VALUE fval = buf->frame_pool[s->frame_start + j];
                 rb_ary_push(frames, rperf_resolve_frame(fval));
             }
 
-            VALUE sample = rb_ary_new3(4, frames, LONG2NUM(s->weight), INT2NUM(s->thread_seq), INT2NUM(s->label_set_id));
+            VALUE sample = rb_ary_new_capa(5);
+            rb_ary_push(sample, frames);
+            rb_ary_push(sample, LONG2NUM(s->weight));
+            rb_ary_push(sample, INT2NUM(s->thread_seq));
+            rb_ary_push(sample, INT2NUM(s->label_set_id));
+            rb_ary_push(sample, INT2NUM(s->vm_state));
             rb_ary_push(samples_ary, sample);
         }
         rb_hash_aset(result, ID2SYM(rb_intern("raw_samples")), samples_ary);

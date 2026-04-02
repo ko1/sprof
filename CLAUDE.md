@@ -52,9 +52,9 @@ See `benchmark/README.md` for full documentation.
 
 - **Weight = time delta, not sample count**: Each sample's weight is `clock_now - clock_prev` in nanoseconds. This corrects for safepoint delays.
 - **Current-thread-only sampling**: Timer-triggered postponed job samples only `rb_thread_current()` (the GVL holder). Combined with GVL event hooks, this gives complete thread coverage without iterating `Thread.list`.
-- **GVL event tracking** (wall mode): Hooks SUSPENDED/READY/RESUMED thread events. SUSPENDED captures backtrace + normal sample. RESUMED records `[GVL blocked]` (off-GVL time) and `[GVL wait]` (GVL contention time) as synthetic frames reusing the saved stack.
-- **GC phase tracking**: Hooks GC_ENTER/GC_EXIT events. Records `[GC marking]` and `[GC sweeping]` samples with wall time weight, attributed to the stack that triggered GC.
-- **Deferred string resolution**: Sampling stores raw frame VALUEs in a pool. String resolution (`rb_profile_frame_full_label`, `rb_profile_frame_path`) happens at stop time, not during sampling. This keeps the hot path allocation-free.
+- **GVL event tracking** (wall mode): Hooks SUSPENDED/READY/RESUMED thread events. SUSPENDED captures backtrace + normal sample. RESUMED records off-GVL time and GVL contention time as samples with `vm_state` (converted to `%GVL: blocked` / `%GVL: wait` labels at encode time), reusing the saved stack.
+- **GC phase tracking**: Hooks GC_ENTER/GC_EXIT events. Records GC mark/sweep samples with `vm_state` (converted to `%GC: mark` / `%GC: sweep` labels at encode time), with wall time weight, attributed to the stack that triggered GC.
+- **Deferred string resolution**: Sampling stores raw frame VALUEs in a pool (no synthetic frame VALUEs — GVL/GC state is tracked via `vm_state` enum, not frames). String resolution (`rb_profile_frame_full_label`, `rb_profile_frame_path`) happens at stop time, not during sampling. This keeps the hot path allocation-free.
 - **No protobuf dependency**: pprof format is encoded with a hand-written encoder in `lib/rperf.rb` (`Rperf::PProf.encode`). String table is built in Ruby at encode time.
 - **Multiple output formats**: pprof (gzip protobuf), collapsed stacks (FlameGraph/speedscope), text (human/AI-readable report). Format auto-detected from file extension.
 - **Timer implementation**: On Linux, defaults to `timer_create` + `SIGEV_SIGNAL` with a `sigaction` handler (SIGRTMIN+8 by default). This gives precise interval timing (median ~1000us at 1000Hz) with no extra thread. The signal number can be changed via `signal:` option. On non-Linux (macOS etc.) or with `signal: false`, falls back to a dedicated pthread + `nanosleep` loop (simpler but ~100us drift per tick).
@@ -69,12 +69,12 @@ See `benchmark/README.md` for full documentation.
 - The C extension uses a single global `rperf_profiler_t`. Only one profiling session at a time.
 - `Rperf.start` accepts `signal:` option (Linux only): `nil`/omitted = timer signal (default), `false`/`0` = nanosleep thread, positive integer = specific signal number (SIGKILL/SIGSTOP rejected). Frequency is validated: 1..10000 (10KHz max).
 - C extension exports `_c_start`/`_c_stop`/`_c_snapshot`/`_c_set_label`/`_c_get_label`/`_c_set_label_sets`/`_c_get_label_sets`/`_c_profile_inc`/`_c_profile_dec`/`_c_running?`; Ruby wraps them as `Rperf.start`/`Rperf.stop`/`Rperf.snapshot`/`Rperf.label`/`Rperf.labels`/`Rperf.profile`.
-- Frame pool (`VALUE *frame_pool`, initial ~1MB) stores raw frame VALUEs from `rb_profile_thread_frames`. A TypedData wrapper with `dmark` using `rb_gc_mark_locations` keeps them alive across GC. Frame table keys array grows dynamically (starts at 4096, 2× on demand) with atomic pointer swaps for GC dmark safety.
+- Frame pool (`VALUE *frame_pool`, initial ~1MB) stores raw frame VALUEs from `rb_profile_thread_frames` (no synthetic frame VALUEs). A TypedData wrapper with `dmark` using `rb_gc_mark_locations` keeps them alive across GC. Frame table keys array grows dynamically (starts at 4096, 2x on demand) with atomic pointer swaps for GC dmark safety.
 - `rb_profile_thread_frames` writes directly into the frame pool (no intermediate buffer).
 - Sample buffer and frame pool both grow by 2x on demand via `realloc`.
 - Per-thread data (`rperf_thread_data_t`) is created via `rperf_thread_data_create()` and tracks per-thread timing state.
 - Thread exit cleanup is handled by `RUBY_INTERNAL_THREAD_EVENT_EXITED` hook. Stop cleans up all live threads' thread-specific data.
-- GVL blocked/wait synthetic frames are only recorded in wall mode (CPU time doesn't advance while off-GVL).
+- GVL blocked/wait samples (with `%GVL` labels) are only recorded in wall mode (CPU time doesn't advance while off-GVL). The C extension returns `vm_state` as a field in `rperf_agg_entry_t`; Ruby's `merge_vm_state_labels!` converts these to `%GVL` / `%GC` labels in `label_sets`. The agg key includes `vm_state` so same-stack different-state samples are kept separate.
 - GC samples always use wall time regardless of mode.
 - `stat` subcommand defaults to wall mode, outputs user/sys/real + time breakdown + GC stats. `--report` adds flat/cumulative top-50 tables. `record -p` prints text profile to stdout.
 - `report` and `diff` subcommands are thin wrappers around `go tool pprof`.

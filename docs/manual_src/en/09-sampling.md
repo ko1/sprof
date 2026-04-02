@@ -87,11 +87,11 @@ When a thread becomes ready to run (e.g., I/O completed):
 
 When a thread reacquires the GVL:
 
-1. Record a `[GVL blocked]` sample: weight = `ready_at - suspended_at` (off-GVL time)
-2. Record a `[GVL wait]` sample: weight = `resumed_at - ready_at` (GVL contention time)
+1. Record a sample with `vm_state = GVL_BLOCKED`: weight = `ready_at - suspended_at` (off-GVL time)
+2. Record a sample with `vm_state = GVL_WAIT`: weight = `resumed_at - ready_at` (GVL contention time)
 3. Both samples reuse the backtrace captured at SUSPENDED
 
-This way, off-GVL time and GVL contention are accurately attributed to the code that triggered them, even though no timer-based sampling can occur while the thread is off the GVL.
+These `vm_state` values are later converted to labels (`%GVL: blocked` and `%GVL: wait`) by the Ruby layer at encoding time. This way, off-GVL time and GVL contention are accurately attributed to the code that triggered them, even though no timer-based sampling can occur while the thread is off the GVL.
 
 ## GC phase tracking
 
@@ -103,7 +103,7 @@ rperf hooks into Ruby's internal GC events to track garbage collection time:
 | `GC_END_MARK` | Set phase to sweeping |
 | `GC_END_SWEEP` | Clear phase |
 | `GC_ENTER` | Capture backtrace + wall timestamp |
-| `GC_EXIT` | Record `[GC marking]` or `[GC sweeping]` sample |
+| `GC_EXIT` | Record sample with `vm_state = GC_MARK` or `vm_state = GC_SWEEP` |
 
 GC samples always use wall time regardless of the profiling mode, because GC time is real elapsed time that affects application latency.
 

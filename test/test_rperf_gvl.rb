@@ -3,7 +3,7 @@ require_relative "test_helper"
 class TestRperfGvl < Test::Unit::TestCase
   include RperfTestHelper
 
-  def test_gvl_blocked_frames_wall_mode
+  def test_gvl_blocked_labels_wall_mode
     Rperf.start(frequency: 100, mode: :wall)
 
     threads = 4.times.map do
@@ -14,15 +14,15 @@ class TestRperfGvl < Test::Unit::TestCase
     data = Rperf.stop
     assert_not_nil data
 
-    labels = data[:aggregated_samples].flat_map { |frames, _| frames.map { |_, label| label } }
-    has_blocked = labels.include?("[GVL blocked]")
-    has_wait = labels.include?("[GVL wait]")
+    labels = extract_vm_state_labels(data)
+    has_blocked = labels.include?("GVL:blocked")
+    has_wait = labels.include?("GVL:wait")
 
     assert has_blocked || has_wait,
-      "Wall mode with sleep should produce [GVL blocked] or [GVL wait] samples"
+      "Wall mode with sleep should produce %GVL blocked or wait labels"
   end
 
-  def test_gvl_events_cpu_mode_no_synthetic
+  def test_gvl_events_cpu_mode_no_labels
     Rperf.start(frequency: 100, mode: :cpu)
 
     threads = 4.times.map do
@@ -33,11 +33,11 @@ class TestRperfGvl < Test::Unit::TestCase
     data = Rperf.stop
     assert_not_nil data
 
-    labels = data[:aggregated_samples].flat_map { |frames, _| frames.map { |_, label| label } }
-    refute labels.include?("[GVL blocked]"),
-      "CPU mode should NOT produce [GVL blocked] samples"
-    refute labels.include?("[GVL wait]"),
-      "CPU mode should NOT produce [GVL wait] samples"
+    labels = extract_vm_state_labels(data)
+    refute labels.include?("GVL:blocked"),
+      "CPU mode should NOT produce %GVL blocked labels"
+    refute labels.include?("GVL:wait"),
+      "CPU mode should NOT produce %GVL wait labels"
   end
 
   def test_gvl_wait_weight_positive
@@ -51,8 +51,10 @@ class TestRperfGvl < Test::Unit::TestCase
     data = Rperf.stop
     assert_not_nil data
 
-    gvl_samples = data[:aggregated_samples].select { |frames, _|
-      frames.any? { |_, label| label == "[GVL blocked]" || label == "[GVL wait]" }
+    label_sets = data[:label_sets] || []
+    gvl_samples = data[:aggregated_samples].select { |_, _, _, label_set_id|
+      ls = label_sets[label_set_id]
+      ls && ls["%GVL"]
     }
 
     gvl_samples.each do |_, weight|
@@ -60,9 +62,9 @@ class TestRperfGvl < Test::Unit::TestCase
     end
   end
 
-  # --- GC synthetic frames ---
+  # --- GC labels ---
 
-  def test_gc_frames_wall_mode
+  def test_gc_labels_wall_mode
     Rperf.start(frequency: 1000, mode: :wall)
 
     # Force GC repeatedly to generate GC samples
@@ -76,15 +78,15 @@ class TestRperfGvl < Test::Unit::TestCase
     data = Rperf.stop
     assert_not_nil data
 
-    labels = data[:aggregated_samples].flat_map { |frames, _| frames.map { |_, label| label } }
-    has_gc_marking = labels.include?("[GC marking]")
-    has_gc_sweeping = labels.include?("[GC sweeping]")
+    labels = extract_vm_state_labels(data)
+    has_gc_marking = labels.include?("GC:mark")
+    has_gc_sweeping = labels.include?("GC:sweep")
 
     assert has_gc_marking || has_gc_sweeping,
-      "Wall mode with forced GC should produce [GC marking] or [GC sweeping] samples"
+      "Wall mode with forced GC should produce %GC mark or sweep labels"
   end
 
-  def test_gc_frames_weight_positive
+  def test_gc_labels_weight_positive
     Rperf.start(frequency: 1000, mode: :wall)
 
     arrays = []
@@ -97,8 +99,10 @@ class TestRperfGvl < Test::Unit::TestCase
     data = Rperf.stop
     assert_not_nil data
 
-    gc_samples = data[:aggregated_samples].select { |frames, _|
-      frames.any? { |_, label| label == "[GC marking]" || label == "[GC sweeping]" }
+    label_sets = data[:label_sets] || []
+    gc_samples = data[:aggregated_samples].select { |_, _, _, label_set_id|
+      ls = label_sets[label_set_id]
+      ls && ls["%GC"]
     }
 
     gc_samples.each do |_, weight|
@@ -106,7 +110,7 @@ class TestRperfGvl < Test::Unit::TestCase
     end
   end
 
-  def test_gc_frames_cpu_mode_still_recorded
+  def test_gc_labels_cpu_mode_still_recorded
     # GC samples use wall time regardless of mode
     Rperf.start(frequency: 1000, mode: :cpu)
 
@@ -120,10 +124,26 @@ class TestRperfGvl < Test::Unit::TestCase
     data = Rperf.stop
     assert_not_nil data
 
-    labels = data[:aggregated_samples].flat_map { |frames, _| frames.map { |_, label| label } }
-    has_gc = labels.include?("[GC marking]") || labels.include?("[GC sweeping]")
-    # GC frames should be recorded even in CPU mode (they use wall time)
+    labels = extract_vm_state_labels(data)
+    has_gc = labels.include?("GC:mark") || labels.include?("GC:sweep")
+    # GC labels should be recorded even in CPU mode (they use wall time)
     assert has_gc,
       "CPU mode should still record GC samples (with wall time weight)"
+  end
+
+  private
+
+  # Extract all %GVL and %GC label values from profiling data
+  # Returns e.g. ["GVL:blocked", "GVL:wait", "GC:mark"]
+  def extract_vm_state_labels(data)
+    label_sets = data[:label_sets] || []
+    result = []
+    data[:aggregated_samples].each do |_, _, _, lsi|
+      ls = label_sets[lsi]
+      next unless ls
+      result << "GVL:#{ls["%GVL"]}" if ls["%GVL"]
+      result << "GC:#{ls["%GC"]}" if ls["%GC"]
+    end
+    result.uniq
   end
 end

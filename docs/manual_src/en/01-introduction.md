@@ -11,7 +11,7 @@ rperf is inspired by Linux [perf](#cite:demelo2010), providing a familiar CLI in
 ### Advantages
 
 - **Accurate profiling**: Time-delta weighting corrects [safepoint bias](#index:safepoint bias), producing results closer to real time distribution than traditional count-based profilers.
-- **GVL / GC visibility**: In wall mode, tracks off-GVL blocking, GVL contention, and GC marking/sweeping as distinct frames — no separate tool needed.
+- **GVL / GC visibility**: In wall mode, tracks off-GVL blocking, GVL contention, and GC marking/sweeping as sample labels — no separate tool needed.
 - **Standard output formats**: Outputs [pprof](#index:pprof) protobuf (compatible with `go tool pprof`), [collapsed stacks](#index:collapsed stacks) (for flame graphs / speedscope), and human-readable text.
 - **Low overhead**: Default 1000 Hz sampling callback cost is < 0.2%, suitable for production.
 - **Simple CLI**: `rperf stat` for a quick overview, `rperf record` + `rperf report` for detailed analysis.
@@ -55,7 +55,7 @@ rperf solves this by recording `clock_now - clock_prev` as the weight of each sa
 
 ### Other advantages
 
-- **GVL and GC awareness**: In wall mode, rperf tracks time spent blocked off the GVL, waiting to reacquire the GVL, and in GC marking/sweeping phases — each as distinct [synthetic frames](#index:synthetic frames).
+- **GVL and GC awareness**: In wall mode, rperf tracks time spent blocked off the GVL, waiting to reacquire the GVL, and in GC marking/sweeping phases — each as sample labels (`%GVL` and `%GC`) that can be filtered with pprof's `-tagfocus` and `-tagroot`.
 - **perf-like CLI**: The [`rperf stat`](#index:rperf stat) command gives you a quick performance overview (like `perf stat`), while [`rperf record`](#index:rperf record) + [`rperf report`](#index:rperf report) gives you detailed profiling.
 - **Standard output**: rperf outputs [pprof](#index:pprof) protobuf format, compatible with Go's `pprof` tool ecosystem, as well as [collapsed stacks](#index:collapsed stacks) for [flame graphs](#cite:gregg2016) and speedscope.
 - **Low overhead**: Default 1000 Hz sampling callback cost is < 0.2%, suitable for production use.

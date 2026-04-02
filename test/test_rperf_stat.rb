@@ -18,15 +18,20 @@ class TestRperfStat < Test::Unit::TestCase
     assert_include output, "Performance stats"
     assert_include output, "real"
     assert_include output, "CPU execution"
-    assert_include output, "[Ruby] detected threads"
+    assert_include output, "[Ruby ] detected threads"
   end
 
   def test_print_stat
     data = {
       aggregated_samples: [
-        [[["/a.rb", "A#foo"], ["/b.rb", "B#bar"]], 100_000_000],
-        [[["<GVL>", "[GVL blocked]"], ["/a.rb", "A#foo"]], 50_000_000],
-        [[["<GC>", "[GC marking]"], ["/a.rb", "A#foo"]], 10_000_000],
+        [[["/a.rb", "A#foo"], ["/b.rb", "B#bar"]], 100_000_000, 1, 0],
+        [[["/a.rb", "A#foo"]], 50_000_000, 1, 1],
+        [[["/a.rb", "A#foo"]], 10_000_000, 1, 2],
+      ],
+      label_sets: [
+        {},
+        { "%GVL" => "blocked" },
+        { "%GC" => "mark" },
       ],
       frequency: 100,
       mode: :wall,
@@ -51,14 +56,14 @@ class TestRperfStat < Test::Unit::TestCase
     assert_include output, "user"
     assert_include output, "sys"
     assert_include output, "real"
-    assert_include output, "CPU execution"
-    assert_include output, "[Ruby] GVL blocked"
-    assert_include output, "[Ruby] GC marking"
-    assert_include output, "[Ruby] GC time"
-    assert_include output, "[Ruby] allocated objects"
-    assert_include output, "[Ruby] freed objects"
-    assert_include output, "[Ruby] detected threads"
-    assert_include output, "[OS] peak memory"
+    assert_include output, "[Rperf] CPU execution"
+    assert_include output, "[Rperf] GVL blocked"
+    assert_include output, "[Rperf] GC marking"
+    assert_include output, "[Ruby ] GC time"
+    assert_include output, "[Ruby ] allocated objects"
+    assert_include output, "[Ruby ] freed objects"
+    assert_include output, "[Ruby ] detected threads"
+    assert_include output, "[OS   ] peak memory"
     assert_include output, "samples"
     assert_include output, "triggers"
     assert_include output, "profiler overhead"
@@ -67,8 +72,12 @@ class TestRperfStat < Test::Unit::TestCase
   def test_stat_report_includes_profile
     data = {
       aggregated_samples: [
-        [[["/a.rb", "A#foo"], ["/b.rb", "B#bar"]], 100_000_000],
-        [[["<GVL>", "[GVL blocked]"], ["/a.rb", "A#foo"]], 50_000_000],
+        [[["/a.rb", "A#foo"], ["/b.rb", "B#bar"]], 100_000_000, 1, 0],
+        [[["/a.rb", "A#foo"]], 50_000_000, 1, 1],
+      ],
+      label_sets: [
+        {},
+        { "%GVL" => "blocked" },
       ],
       frequency: 100,
       mode: :wall,
@@ -103,11 +112,18 @@ class TestRperfStat < Test::Unit::TestCase
   def test_stat_breakdown_categories
     data = {
       aggregated_samples: [
-        [[["/a.rb", "A#foo"]], 100_000_000],              # cpu_execution
-        [[["<GVL>", "[GVL blocked]"], ["/a.rb", "A#foo"]], 50_000_000],  # gvl_blocked
-        [[["<GVL>", "[GVL wait]"], ["/a.rb", "A#foo"]], 30_000_000],     # gvl_wait
-        [[["<GC>", "[GC marking]"], ["/a.rb", "A#foo"]], 20_000_000],    # gc_marking
-        [[["<GC>", "[GC sweeping]"], ["/a.rb", "A#foo"]], 10_000_000],   # gc_sweeping
+        [[["/a.rb", "A#foo"]], 100_000_000, 1, 0],             # cpu_execution
+        [[["/a.rb", "A#foo"]], 50_000_000, 1, 1],              # gvl_blocked
+        [[["/a.rb", "A#foo"]], 30_000_000, 1, 2],              # gvl_wait
+        [[["/a.rb", "A#foo"]], 20_000_000, 1, 3],              # gc_marking
+        [[["/a.rb", "A#foo"]], 10_000_000, 1, 4],              # gc_sweeping
+      ],
+      label_sets: [
+        {},
+        { "%GVL" => "blocked" },
+        { "%GVL" => "wait" },
+        { "%GC" => "mark" },
+        { "%GC" => "sweep" },
       ],
       frequency: 100,
       mode: :wall,
@@ -127,10 +143,10 @@ class TestRperfStat < Test::Unit::TestCase
     $stderr = old_stderr
     ENV.delete("RPERF_STAT_COMMAND")
 
-    assert_include output, "CPU execution"
-    assert_include output, "[Ruby] GVL blocked"
-    assert_include output, "[Ruby] GVL wait"
-    assert_include output, "[Ruby] GC marking"
-    assert_include output, "[Ruby] GC sweeping"
+    assert_include output, "[Rperf] CPU execution"
+    assert_include output, "[Rperf] GVL blocked"
+    assert_include output, "[Rperf] GVL wait"
+    assert_include output, "[Rperf] GC marking"
+    assert_include output, "[Rperf] GC sweeping"
   end
 end

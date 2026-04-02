@@ -55,6 +55,15 @@ module Rperf
     end
   end
 
+  # VM state integer → label value mapping.
+  # These values appear in the "Ruby" label key.
+  VM_STATE_LABELS = {
+    1 => ["%GVL", "blocked"],
+    2 => ["%GVL", "wait"],
+    3 => ["%GC",  "mark"],
+    4 => ["%GC",  "sweep"],
+  }.freeze
+
   def self.stop
     data = _c_stop
     return unless data
@@ -63,16 +72,18 @@ module Rperf
     # :aggregated_samples.  Build aggregated view so encoders always work.
     if data[:raw_samples] && !data[:aggregated_samples]
       merged = {}
-      data[:raw_samples].each do |frames, weight, thread_seq, label_set_id|
-        key = [frames, thread_seq || 0, label_set_id || 0]
+      data[:raw_samples].each do |frames, weight, thread_seq, label_set_id, vm_state|
+        key = [frames, thread_seq || 0, label_set_id || 0, vm_state || 0]
         if merged.key?(key)
           merged[key] += weight
         else
           merged[key] = weight
         end
       end
-      data[:aggregated_samples] = merged.map { |(frames, ts, lsi), w| [frames, w, ts, lsi] }
+      data[:aggregated_samples] = merged.map { |(frames, ts, lsi, vs), w| [frames, w, ts, lsi, vs] }
     end
+
+    merge_vm_state_labels!(data)
 
     print_stats(data) if @verbose
     print_stat(data) if @stat
@@ -95,7 +106,10 @@ module Rperf
   # This allows interval-based profiling where each snapshot covers only
   # the period since the last clear.
   def self.snapshot(clear: false)
-    _c_snapshot(clear)
+    data = _c_snapshot(clear)
+    return unless data
+    merge_vm_state_labels!(data)
+    data
   end
 
   # Label set management for per-context profiling.
@@ -189,6 +203,42 @@ module Rperf
   end
 
 
+  # Merge vm_state from C samples into label_sets as a "Ruby" label key.
+  # Mutates data in place: updates label_set_id on each sample, strips vm_state,
+  # and extends label_sets with new entries as needed.
+  def self.merge_vm_state_labels!(data)
+    samples_key = data[:aggregated_samples] ? :aggregated_samples : :raw_samples
+    samples = data[samples_key]
+    return unless samples
+
+    label_sets = (data[:label_sets] || [{}]).dup
+    mapping = {}  # [original_label_set_id, vm_state] => new_label_set_id
+
+    samples.each do |sample|
+      vm_state = sample[4] || 0
+      next if vm_state == 0
+
+      label_set_id = sample[3] || 0
+      cache_key = [label_set_id, vm_state]
+      new_id = mapping[cache_key]
+      unless new_id
+        base = label_sets[label_set_id] || {}
+        key, value = VM_STATE_LABELS[vm_state]
+        new_ls = base.merge(key => value).freeze
+        new_id = label_sets.size
+        label_sets << new_ls
+        mapping[cache_key] = new_id
+      end
+      sample[3] = new_id
+    end
+
+    # Strip vm_state (5th element) from all samples
+    samples.each { |s| s.pop if s.size > 4 }
+
+    data[:label_sets] = label_sets
+  end
+  private_class_method :merge_vm_state_labels!
+
   # Saves profiling data to a file.
   # format: :pprof, :collapsed, or :text. nil = auto-detect from path extension
   #   .collapsed → collapsed stacks (FlameGraph / speedscope compatible)
@@ -240,9 +290,9 @@ module Rperf
     total_ms = total_ns / 1_000_000.0
     avg_us = count > 0 ? total_ns / count / 1000.0 : 0.0
 
-    $stderr.puts "[rperf] mode=#{mode} frequency=#{frequency}Hz"
-    $stderr.puts "[rperf] sampling: #{count} calls, #{format("%.2f", total_ms)}ms total, #{format("%.1f", avg_us)}us/call avg"
-    $stderr.puts "[rperf] samples recorded: #{sample_count}"
+    $stderr.puts "[Rperf] mode=#{mode} frequency=#{frequency}Hz"
+    $stderr.puts "[Rperf] sampling: #{count} calls, #{format("%.2f", total_ms)}ms total, #{format("%.1f", avg_us)}us/call avg"
+    $stderr.puts "[Rperf] samples recorded: #{sample_count}"
 
     print_top(data)
   end
@@ -291,13 +341,13 @@ module Rperf
 
   def self.print_top_table(kind, table, total_weight)
     top = table.sort_by { |_, w| -w }.first(TOP_N)
-    $stderr.puts "[rperf] top #{top.size} by #{kind}:"
+    $stderr.puts "[Rperf] top #{top.size} by #{kind}:"
     top.each do |key, weight|
       label, path = key
       ms = weight / 1_000_000.0
       pct = total_weight > 0 ? weight * 100.0 / total_weight : 0.0
       loc = path.empty? ? "" : " (#{path})"
-      $stderr.puts format("[rperf]   %8.1fms %5.1f%%  %s%s", ms, pct, label, loc)
+      $stderr.puts format("[Rperf]   %8.1fms %5.1f%%  %s%s", ms, pct, label, loc)
     end
   end
 
@@ -327,7 +377,7 @@ module Rperf
     $stderr.puts format("  %14s ms   real", format_ms(real_ns))
 
     if samples_raw.size > 0
-      breakdown, total_weight = compute_stat_breakdown(samples_raw)
+      breakdown, total_weight = compute_stat_breakdown(samples_raw, data[:label_sets])
       print_stat_breakdown(breakdown, total_weight)
       print_stat_runtime_info(data)
       print_stat_system_info
@@ -338,20 +388,25 @@ module Rperf
     $stderr.puts
   end
 
-  def self.compute_stat_breakdown(samples_raw)
+  def self.compute_stat_breakdown(samples_raw, label_sets)
     breakdown = Hash.new(0)
     total_weight = 0
 
-    samples_raw.each do |frames, weight|
+    samples_raw.each do |frames, weight, _thread_seq, label_set_id|
       total_weight += weight
-      leaf_label = frames.first&.last || ""
-      category = case leaf_label
-                 when "[GVL blocked]" then :gvl_blocked
-                 when "[GVL wait]"    then :gvl_wait
-                 when "[GC marking]"  then :gc_marking
-                 when "[GC sweeping]" then :gc_sweeping
-                 else :cpu_execution
-                 end
+      category = :cpu_execution
+      if label_sets && label_set_id && label_set_id > 0
+        ls = label_sets[label_set_id]
+        if ls
+          gvl = ls["%GVL"]
+          gc  = ls["%GC"]
+          if gvl == "blocked"    then category = :gvl_blocked
+          elsif gvl == "wait"    then category = :gvl_wait
+          elsif gc  == "mark"    then category = :gc_marking
+          elsif gc  == "sweep"   then category = :gc_sweeping
+          end
+        end
+      end
       breakdown[category] += weight
     end
 
@@ -363,11 +418,11 @@ module Rperf
     $stderr.puts
 
     [
-      [:cpu_execution, "CPU execution"],
-      [:gvl_blocked,   "[Ruby] GVL blocked (I/O, sleep)"],
-      [:gvl_wait,      "[Ruby] GVL wait (contention)"],
-      [:gc_marking,    "[Ruby] GC marking"],
-      [:gc_sweeping,   "[Ruby] GC sweeping"],
+      [:cpu_execution, "[Rperf] CPU execution"],
+      [:gvl_blocked,   "[Rperf] GVL blocked (I/O, sleep)"],
+      [:gvl_wait,      "[Rperf] GVL wait (contention)"],
+      [:gc_marking,    "[Rperf] GC marking"],
+      [:gc_sweeping,   "[Rperf] GC sweeping"],
     ].each do |key, label|
       w = breakdown[key]
       next if w == 0
@@ -378,20 +433,20 @@ module Rperf
   private_class_method :print_stat_breakdown
 
   def self.print_stat_runtime_info(data)
-    thread_count = data[:detected_thread_count] || 0
-    $stderr.puts STAT_LINE.call(format_integer(thread_count), "  ", "[Ruby] detected threads") if thread_count > 0
     gc = GC.stat
     $stderr.puts STAT_LINE.call(format_ms(gc[:time] * 1_000_000), "ms",
-                                "[Ruby] GC time (%s count: %s minor, %s major)" % [
+                                "[Ruby ] GC time (%s count: %s minor, %s major)" % [
                                   format_integer(gc[:count]),
                                   format_integer(gc[:minor_gc_count]),
                                   format_integer(gc[:major_gc_count])])
-    $stderr.puts STAT_LINE.call(format_integer(gc[:total_allocated_objects]), "  ", "[Ruby] allocated objects")
-    $stderr.puts STAT_LINE.call(format_integer(gc[:total_freed_objects]), "  ", "[Ruby] freed objects")
+    $stderr.puts STAT_LINE.call(format_integer(gc[:total_allocated_objects]), "  ", "[Ruby ] allocated objects")
+    $stderr.puts STAT_LINE.call(format_integer(gc[:total_freed_objects]), "  ", "[Ruby ] freed objects")
+    thread_count = data[:detected_thread_count] || 0
+    $stderr.puts STAT_LINE.call(format_integer(thread_count), "  ", "[Ruby ] detected threads") if thread_count > 0
     if defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?
       yjit = RubyVM::YJIT.runtime_stats
       if yjit[:ratio_in_yjit]
-        $stderr.puts STAT_LINE.call(format("%.1f%%", yjit[:ratio_in_yjit] * 100), "  ", "[Ruby] YJIT code execution ratio")
+        $stderr.puts STAT_LINE.call(format("%.1f%%", yjit[:ratio_in_yjit] * 100), "  ", "[Ruby ] YJIT code execution ratio")
       end
     end
   end
@@ -401,12 +456,20 @@ module Rperf
     sys_stats = get_system_stats
     maxrss_kb = sys_stats[:maxrss_kb]
     if maxrss_kb
-      $stderr.puts STAT_LINE.call(format_integer((maxrss_kb / 1024.0).round), "MB", "[OS] peak memory (maxrss)")
+      $stderr.puts STAT_LINE.call(format_integer((maxrss_kb / 1024.0).round), "MB", "[OS   ] peak memory (maxrss)")
+    end
+    if sys_stats[:page_faults_minor]
+      minor = sys_stats[:page_faults_minor]
+      major = sys_stats[:page_faults_major]
+      $stderr.puts STAT_LINE.call(
+        format_integer(minor + major), "  ",
+        "[OS   ] page faults (%s minor, %s major)" % [
+          format_integer(minor), format_integer(major)])
     end
     if sys_stats[:ctx_voluntary]
       $stderr.puts STAT_LINE.call(
         format_integer(sys_stats[:ctx_voluntary] + sys_stats[:ctx_involuntary]), "  ",
-        "[OS] context switches (%s voluntary, %s involuntary)" % [
+        "[OS   ] context switches (%s voluntary, %s involuntary)" % [
           format_integer(sys_stats[:ctx_voluntary]),
           format_integer(sys_stats[:ctx_involuntary])])
     end
@@ -415,7 +478,7 @@ module Rperf
       w = sys_stats[:io_write_bytes]
       $stderr.puts STAT_LINE.call(
         format_integer(((r + w) / 1024.0 / 1024.0).round), "MB",
-        "[OS] disk I/O (%s MB read, %s MB write)" % [
+        "[OS   ] disk I/O (%s MB read, %s MB write)" % [
           format_integer((r / 1024.0 / 1024.0).round),
           format_integer((w / 1024.0 / 1024.0).round)])
     end
@@ -475,6 +538,12 @@ module Rperf
       # macOS/BSD: ps reports RSS in KB
       rss = `ps -o rss= -p #{$$}`.strip.to_i rescue nil
       stats[:maxrss_kb] = rss if rss && rss > 0
+    end
+
+    if File.readable?("/proc/self/stat")
+      fields = File.read("/proc/self/stat").split
+      stats[:page_faults_minor] = fields[9].to_i
+      stats[:page_faults_major] = fields[11].to_i
     end
 
     if File.readable?("/proc/self/io")

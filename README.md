@@ -147,21 +147,21 @@ If a safepoint is delayed, the sample carries proportionally more weight. The to
 
 Use `cpu` to find what consumes CPU. Use `wall` to find what makes things slow (I/O, GVL contention, GC).
 
-### Synthetic Frames (wall mode)
+### GVL and GC Labels (wall mode)
 
-rperf hooks GVL and GC events to attribute non-CPU time:
+rperf hooks GVL and GC events to attribute non-CPU time. These are recorded as labels on samples rather than synthetic stack frames:
 
-| Frame | Meaning |
+| Label | Meaning |
 |-------|---------|
-| `[GVL blocked]` | Off-GVL time (I/O, sleep, C extension releasing GVL) |
-| `[GVL wait]` | Waiting to reacquire the GVL (contention) |
-| `[GC marking]` | Time in GC mark phase |
-| `[GC sweeping]` | Time in GC sweep phase |
+| `%GVL: blocked` | Off-GVL time (I/O, sleep, C extension releasing GVL) |
+| `%GVL: wait` | Waiting to reacquire the GVL (contention) |
+| `%GC: mark` | Time in GC mark phase |
+| `%GC: sweep` | Time in GC sweep phase |
 
 ## Why rperf?
 
 - **Accurate despite safepoints** — Safepoint sampling is *safer* (no async-signal-safety issues), but normally *inaccurate*. rperf compensates with real time-delta weights, so profiles faithfully reflect where time is actually spent.
-- **See the whole picture** (wall mode) — GVL contention, off-GVL I/O, GC marking/sweeping — all attributed to the call stacks responsible, via synthetic frames.
+- **See the whole picture** (wall mode) — GVL contention, off-GVL I/O, GC marking/sweeping — all attributed to the call stacks responsible, via sample labels.
 - **Low overhead** — Signal-based timer on Linux (no extra thread). ~1–5 µs per sample.
 - **pprof compatible** — Works with `go tool pprof`, speedscope, and other standard tools out of the box.
 - **Zero code changes** — Profile any Ruby program via CLI or environment variables. Drop-in for Rails, too.

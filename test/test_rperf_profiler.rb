@@ -277,9 +277,9 @@ class TestRperfProfiler < Test::Unit::TestCase
     output = $stderr.string
     $stderr = old_stderr
 
-    assert_include output, "[rperf] mode="
-    assert_include output, "[rperf] sampling:"
-    assert_include output, "[rperf] samples recorded:"
+    assert_include output, "[Rperf] mode="
+    assert_include output, "[Rperf] sampling:"
+    assert_include output, "[Rperf] samples recorded:"
   end
 
   def test_verbose_top_tables
@@ -293,7 +293,7 @@ class TestRperfProfiler < Test::Unit::TestCase
     output = $stderr.string
     $stderr = old_stderr
 
-    assert_include output, "[rperf] top"
+    assert_include output, "[Rperf] top"
     assert_include output, "by flat:"
     assert_include output, "by cum:"
   end

@@ -45,14 +45,14 @@ Using uint32_t frame IDs instead of full VALUEs halves the memory needed for sta
 
 The aggregation table merges identical stacks by summing their weights:
 
-- **Key**: `(frame_ids[], thread_seq, label_set_id)` — the stack (as frame IDs), thread sequence number, and label set
+- **Key**: `(frame_ids[], thread_seq, label_set_id, vm_state)` — the stack (as frame IDs), thread sequence number, label set, and VM state
 - **Value**: accumulated weight in nanoseconds
 
 Frame IDs are stored contiguously in a separate stack pool. Each aggregation table entry points into this pool (start index + depth).
 
-Synthetic frames (`[GVL blocked]`, `[GVL wait]`, `[GC marking]`, `[GC sweeping]`) are converted to reserved frame IDs during aggregation, eliminating the `type` field from the sample representation. This unifies the treatment of real and synthetic frames.
+The `vm_state` field records the VM activity at sample time (e.g., `GVL_BLOCKED`, `GVL_WAIT`, `GC_MARK`, `GC_SWEEP`, or `NORMAL`). It is part of the aggregation key so that samples with the same stack but different VM states are kept separate. At encoding time, the Ruby layer converts `vm_state` to labels (`%GVL` and `%GC`) via `merge_vm_state_labels!`.
 
-The `label_set_id` is part of the key, so samples with the same stack but different labels are kept separate.
+The `label_set_id` is also part of the key, so samples with the same stack but different user labels are kept separate.
 
 ## Memory usage
 

@@ -7,8 +7,10 @@ This chapter describes how rperf converts its internal aggregated data into outp
 When `Rperf.stop` is called, the C extension returns the aggregated data to Ruby:
 
 1. **Frame table**: An array of `[path, label]` string pairs, indexed by frame ID. Strings are resolved from raw VALUEs via `rb_profile_frame_full_label` and `rb_profile_frame_path`.
-2. **Aggregation table**: An array of `[frame_ids, weight, thread_seq, label_set_id]` entries.
+2. **Aggregation table**: An array of `[frame_ids, weight, thread_seq, label_set_id, vm_state]` entries.
 3. **Label sets**: An array of frozen Hashes mapping label keys to values.
+
+Before passing the data to encoders, the Ruby layer calls `merge_vm_state_labels!` to convert each sample's `vm_state` into labels: `vm_state = GVL_BLOCKED` becomes `{"%GVL" => "blocked"}`, `GVL_WAIT` becomes `{"%GVL" => "wait"}`, `GC_MARK` becomes `{"%GC" => "mark"}`, and `GC_SWEEP` becomes `{"%GC" => "sweep"}`. These labels are merged into the sample's existing `label_set_id`, so they appear alongside user labels like `endpoint` in the output.
 
 The Ruby encoders (`Rperf::PProf`, `Rperf::Collapsed`, `Rperf::Text`) consume these arrays to produce the final output.
 

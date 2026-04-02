@@ -120,10 +120,10 @@ These are used internally by the CLI to configure the auto-started profiler:
 | Aspect | cpu | wall |
 |--------|-----|------|
 | Clock | `CLOCK_THREAD_CPUTIME_ID` | `CLOCK_MONOTONIC` |
-| I/O time | Not measured | `[GVL blocked]` |
-| Sleep time | Not measured | `[GVL blocked]` |
-| GVL contention | Not measured | `[GVL wait]` |
-| GC time | `[GC marking]`, `[GC sweeping]` | `[GC marking]`, `[GC sweeping]` |
+| I/O time | Not measured | `%GVL: blocked` label |
+| Sleep time | Not measured | `%GVL: blocked` label |
+| GVL contention | Not measured | `%GVL: wait` label |
+| GC time | `%GC: mark`, `%GC: sweep` labels | `%GC: mark`, `%GC: sweep` labels |
 | Best for | CPU hotspots | Latency analysis |
 
 ## Output format comparison
@@ -134,11 +134,13 @@ These are used internally by the CLI to configure the auto-started profiler:
 | `.collapsed` | Collapsed stacks | flamegraph.pl or speedscope |
 | `.txt` | Text report | None |
 
-## Synthetic frames
+## VM state labels
 
-| Frame | Mode | Meaning |
-|-------|------|---------|
-| `[GVL blocked]` | wall | Thread off-GVL (I/O, sleep, C ext) |
-| `[GVL wait]` | wall | Thread waiting for GVL (contention) |
-| `[GC marking]` | both | GC marking phase (wall time) |
-| `[GC sweeping]` | both | GC sweeping phase (wall time) |
+| Label | Value | Mode | Meaning |
+|-------|-------|------|---------|
+| `%GVL` | `blocked` | wall | Thread off-GVL (I/O, sleep, C ext) |
+| `%GVL` | `wait` | wall | Thread waiting for GVL (contention) |
+| `%GC` | `mark` | both | GC marking phase (wall time) |
+| `%GC` | `sweep` | both | GC sweeping phase (wall time) |
+
+These labels are attached to samples alongside user labels. In pprof output, filter with `-tagfocus=%GVL=blocked`, `-tagroot=%GC`, etc.

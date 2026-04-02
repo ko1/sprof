@@ -380,7 +380,7 @@ wall_data = Rperf.start(mode: :wall) { workload }
 Rperf.save("wall.txt", wall_data)
 ```
 
-The CPU profile will focus on `compute_something`, while the wall profile will show the `sleep` calls as `[GVL blocked]` time.
+The CPU profile will focus on `compute_something`, while the wall profile will show the `sleep` calls with a `%GVL: blocked` label.
 
 ### Processing samples
 
