@@ -188,7 +188,7 @@ rperf hooks GVL and GC events to attribute non-CPU time. These are recorded as l
 - **Method-level only** — no line-level granularity.
 - **Ruby >= 3.4.0** — uses recent VM internals (postponed jobs, thread event hooks).
 - **POSIX only** — Linux, macOS. No Windows.
-- **No fork support** — profiling does not follow fork(2) child processes.
+- **No fork following** — profiling stops in fork(2) child processes (the child can start a new session).
 
 
 ## Output Formats

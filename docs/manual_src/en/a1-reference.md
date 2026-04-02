@@ -114,6 +114,7 @@ These are used internally by the CLI to configure the auto-started profiler:
 | `RPERF_STAT_REPORT` | `1` | Include profile tables in stat output |
 | `RPERF_STAT_COMMAND` | string | Command string shown in stat output header |
 | `RPERF_AGGREGATE` | `0` | Disable sample aggregation (return raw samples) |
+| `RPERF_SIGNAL` | integer or `false` | Timer signal (Linux only): signal number, or `false` for nanosleep thread |
 
 ## Profiling mode comparison
 

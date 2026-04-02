@@ -12,7 +12,7 @@ rperf は Linux の [perf](#cite:demelo2010) に着想を得ており、`record`
 
 - **正確なプロファイリング**: 時間差分重み付けが[セーフポイントバイアス](#index:safepoint bias)を補正し、従来のカウントベースのプロファイラよりも実際の時間分布に近い結果を生成します。
 - **GVL / GC の可視化**: wall モードでは、GVL 外のブロッキング、GVL 競合、GC marking/sweeping をサンプルラベル（`%GVL`、`%GC`）として追跡します。別途ツールは不要です。
-- **標準出力形式**: [pprof](#index:pprof) protobuf（`go tool pprof` と互換）、[collapsed stacks](#index:collapsed stacks)（フレームグラフ / speedscope 向け）、人間が読めるテキスト形式で出力します。
+- **標準出力形式**: [JSON](#index:JSON)（rperf ネイティブ、デフォルト）、[pprof](#index:pprof) protobuf（`go tool pprof` と互換）、[collapsed stacks](#index:collapsed stacks)（フレームグラフ / speedscope 向け）、人間が読めるテキスト形式で出力します。
 - **低オーバーヘッド**: デフォルト 1000 Hz でのサンプリングコールバックコストは < 0.2% で、本番環境での使用に適しています。
 - **シンプルな CLI**: `rperf stat` で概要を素早く確認し、`rperf record` + `rperf report` で詳細な分析が可能です。
 
@@ -57,14 +57,14 @@ rperf は各サンプルの重みとして `clock_now - clock_prev` を記録す
 
 - **GVL と GC の認識**: wall モードでは、rperf は GVL 外でのブロック時間、GVL の再取得待ち時間、GC の marking/sweeping フェーズの時間を、サンプルラベル（`%GVL=blocked`/`wait`、`%GC=mark`/`sweep`）として追跡します。これらはユーザーラベルと同様に `label_sets` に格納され、pprof で `-tagfocus` 等を使ってフィルタリングできます。
 - **perf ライクな CLI**: [`rperf stat`](#index:rperf stat) コマンドで性能の概要を素早く確認でき（`perf stat` のように）、[`rperf record`](#index:rperf record) + [`rperf report`](#index:rperf report) で詳細なプロファイリングが可能です。
-- **標準出力**: rperf は [pprof](#index:pprof) protobuf 形式で出力し、Go の `pprof` ツールエコシステムと互換性があります。[フレームグラフ](#cite:gregg2016)や speedscope 向けの [collapsed stacks](#index:collapsed stacks) 形式もサポートしています。
+- **標準出力**: rperf は [JSON](#index:JSON)（ネイティブ形式、デフォルト）、[pprof](#index:pprof) protobuf 形式（Go の `pprof` ツールエコシステムと互換）、[collapsed stacks](#index:collapsed stacks)（[フレームグラフ](#cite:gregg2016)や speedscope 向け）、人間が読めるテキスト形式で出力します。
 - **低オーバーヘッド**: デフォルト 1000 Hz でのサンプリングコールバックコストは < 0.2% で、本番環境での使用に適しています。
 
 ## 要件
 
 - Ruby >= 3.4.0
 - POSIX システム (Linux または macOS)
-- Go (オプション、`rperf report` および `rperf diff` サブコマンド用)
+- Go (オプション、`rperf report` で `.pb.gz` ファイルと `rperf diff` サブコマンド用)
 
 ## クイックスタート
 

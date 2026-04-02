@@ -75,7 +75,7 @@ data = Rperf.stop
 | `mode:` | Symbol | `:cpu` | `:cpu` または `:wall` |
 | `output:` | String | `nil` | 停止時に書き込むファイルパス |
 | `verbose:` | Boolean | `false` | 統計を stderr に出力 |
-| `format:` | Symbol | `nil` | `:pprof`、`:collapsed`、`:text`、または `nil`（output 拡張子から自動検出） |
+| `format:` | Symbol | `nil` | `:json`、`:pprof`、`:collapsed`、`:text`、または `nil`（output 拡張子から自動検出） |
 | `signal:` | Integer/Boolean | `nil` | Linux のみ: `nil` = タイマーシグナル（デフォルト）、`false` = nanosleep スレッド、正の整数 = 特定の RT シグナル番号 |
 | `aggregate:` | Boolean | `true` | 同一スタックをプロファイリング中に集約してメモリを削減。`false` は生のサンプルごとのデータを返す |
 | `defer:` | Boolean | `false` | タイマーを一時停止した状態で開始。特定のセクションのサンプリングを有効にするには [`Rperf.profile`](#index:Rperf.profile) ブロックを使用 |

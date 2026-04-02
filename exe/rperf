@@ -31,7 +31,7 @@ def run_pprof_subcommand(name, banner, min_files:)
 
   begin
     parser.order!(ARGV)
-  rescue OptionParser::InvalidOption => e
+  rescue OptionParser::InvalidOption, OptionParser::MissingArgument => e
     $stderr.puts e.message
     $stderr.puts parser
     exit 1
@@ -260,7 +260,7 @@ end
 
 begin
   parser.order!(ARGV)
-rescue OptionParser::InvalidOption => e
+rescue OptionParser::InvalidOption, OptionParser::MissingArgument => e
   $stderr.puts e.message
   $stderr.puts parser
   exit 1

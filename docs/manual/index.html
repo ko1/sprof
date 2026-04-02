@@ -1574,7 +1574,7 @@ details.mermaid-source pre {
 
 <p>A safepoint-based sampling performance profiler for Ruby.</p>
 
-<p>rperf profiles your Ruby programs by sampling at safepoints and using actual time deltas as weights to correct safepoint bias. It provides a <code>perf</code>-like CLI, a Ruby API, and outputs pprof, collapsed stacks, and text report formats.</p>
+<p>rperf profiles your Ruby programs by sampling at safepoints and using actual time deltas as weights to correct safepoint bias. It provides a <code>perf</code>-like CLI, a Ruby API, and outputs JSON, pprof, collapsed stacks, and text report formats.</p>
 
 <p><strong>Key features:</strong></p>
 
@@ -1582,7 +1582,7 @@ details.mermaid-source pre {
   <li>CPU and wall-clock profiling modes</li>
   <li>Time-weighted sampling that corrects safepoint bias</li>
   <li>GVL contention and GC phase tracking</li>
-  <li>pprof, collapsed stacks, and text output formats</li>
+  <li>JSON (native), pprof, collapsed stacks, and text output formats</li>
   <li>Low overhead (sampling callback cost &lt; 0.2% at default 1000 Hz)</li>
   <li>Requires Ruby &gt;= 3.4.0 on POSIX systems (Linux, macOS)</li>
 </ul>
@@ -1813,7 +1813,7 @@ details.mermaid-source pre {
 <ul>
   <li><strong>Accurate profiling</strong>: Time-delta weighting corrects <span id="en--01-introduction--idx-7">safepoint bias</span>, producing results closer to real time distribution than traditional count-based profilers.</li>
   <li><strong>GVL / GC visibility</strong>: In wall mode, tracks off-GVL blocking, GVL contention, and GC marking/sweeping as sample labels — no separate tool needed.</li>
-  <li><strong>Standard output formats</strong>: Outputs <span id="en--01-introduction--idx-8">pprof</span> protobuf (compatible with <code>go tool pprof</code>), <span id="en--01-introduction--idx-9">collapsed stacks</span> (for flame graphs / speedscope), and human-readable text.</li>
+  <li><strong>Standard output formats</strong>: Outputs <span id="en--01-introduction--idx-8">JSON</span> (rperf native, default), <span id="en--01-introduction--idx-9">pprof</span> protobuf (compatible with <code>go tool pprof</code>), <span id="en--01-introduction--idx-10">collapsed stacks</span> (for flame graphs / speedscope), and human-readable text.</li>
   <li><strong>Low overhead</strong>: Default 1000 Hz sampling callback cost is &lt; 0.2%, suitable for production.</li>
   <li><strong>Simple CLI</strong>: <code>rperf stat</code> for a quick overview, <code>rperf record</code> + <code>rperf report</code> for detailed analysis.</li>
 </ul>
@@ -1836,7 +1836,7 @@ details.mermaid-source pre {
 
 <p>Most Ruby sampling profilers collect backtraces by calling <code>rb_profile_frames</code> directly in the signal handler. This approach yields backtraces at the actual signal timing, but relies on undocumented internal VM state — <code>rb_profile_frames</code> is not guaranteed to be async-signal-safe, and the results can be unreliable if the VM is in the middle of updating its internal structures.</p>
 
-<p>rperf takes a different approach: it uses the <span id="en--01-introduction--idx-10">postponed job</span> mechanism (<code>rb_postponed_job</code>), which is the Ruby VM’s official API for safely deferring work from signal handlers. Backtrace collection is deferred to the next <span id="en--01-introduction--idx-11">safepoint</span> — a point where the VM is in a consistent state and <code>rb_profile_frames</code> can return reliable results. The trade-off is that when a timer fires between safepoints, the actual sample is delayed until the next safepoint.</p>
+<p>rperf takes a different approach: it uses the <span id="en--01-introduction--idx-11">postponed job</span> mechanism (<code>rb_postponed_job</code>), which is the Ruby VM’s official API for safely deferring work from signal handlers. Backtrace collection is deferred to the next <span id="en--01-introduction--idx-12">safepoint</span> — a point where the VM is in a consistent state and <code>rb_profile_frames</code> can return reliable results. The trade-off is that when a timer fires between safepoints, the actual sample is delayed until the next safepoint.</p>
 
 <p>If each sample were counted equally (weight = 1), a sample delayed by a long-running C method would get the same weight as one taken immediately. This is the <span id="en--01-introduction--cite-2">safepoint bias<sup class="cite-ref"><a href="#bib-mytkowicz2010" title="Todd Mytkowicz and Amer Diwan and Matthias Hauswirth and Peter F. Sweeney. Evaluating the Accuracy of Java Profilers. ACM. pp. 187--197. 2010." onclick="showChapterAndScroll('__bibliography__', 'bib-mytkowicz2010'); return false;">[Todd, 2010]</a></sup></span> problem: functions that happen to be running when the thread reaches a safepoint appear more often than they should, while functions between safepoints are under-represented.</p>
 
@@ -1873,8 +1873,8 @@ sequenceDiagram
 
 <ul>
   <li><strong>GVL and GC awareness</strong>: In wall mode, rperf tracks time spent blocked off the GVL, waiting to reacquire the GVL, and in GC marking/sweeping phases — each as sample labels (<code>%GVL</code> and <code>%GC</code>) that can be filtered with pprof’s <code>-tagfocus</code> and <code>-tagroot</code>.</li>
-  <li><strong>perf-like CLI</strong>: The <span id="en--01-introduction--idx-12"><code>rperf stat</code></span> command gives you a quick performance overview (like <code>perf stat</code>), while <span id="en--01-introduction--idx-13"><code>rperf record</code></span> + <span id="en--01-introduction--idx-14"><code>rperf report</code></span> gives you detailed profiling.</li>
-  <li><strong>Standard output</strong>: rperf outputs <span id="en--01-introduction--idx-15">pprof</span> protobuf format, compatible with Go’s <code>pprof</code> tool ecosystem, as well as <span id="en--01-introduction--idx-16">collapsed stacks</span> for <span id="en--01-introduction--cite-3">flame graphs<sup class="cite-ref"><a href="#bib-gregg2016" title="Brendan Gregg. The Flame Graph. Communications of the ACM. Vol. 59. No. 6. pp. 48--57. 2016." onclick="showChapterAndScroll('__bibliography__', 'bib-gregg2016'); return false;">[Brendan, 2016]</a></sup></span> and speedscope.</li>
+  <li><strong>perf-like CLI</strong>: The <span id="en--01-introduction--idx-13"><code>rperf stat</code></span> command gives you a quick performance overview (like <code>perf stat</code>), while <span id="en--01-introduction--idx-14"><code>rperf record</code></span> + <span id="en--01-introduction--idx-15"><code>rperf report</code></span> gives you detailed profiling.</li>
+  <li><strong>Standard output</strong>: rperf outputs <span id="en--01-introduction--idx-16">JSON</span> (native format, default), <span id="en--01-introduction--idx-17">pprof</span> protobuf format (compatible with Go’s <code>pprof</code> tool ecosystem), <span id="en--01-introduction--idx-18">collapsed stacks</span> (for <span id="en--01-introduction--cite-3">flame graphs<sup class="cite-ref"><a href="#bib-gregg2016" title="Brendan Gregg. The Flame Graph. Communications of the ACM. Vol. 59. No. 6. pp. 48--57. 2016." onclick="showChapterAndScroll('__bibliography__', 'bib-gregg2016'); return false;">[Brendan, 2016]</a></sup></span> and speedscope), and human-readable text.</li>
   <li><strong>Low overhead</strong>: Default 1000 Hz sampling callback cost is &lt; 0.2%, suitable for production use.</li>
 </ul>
 
@@ -1883,7 +1883,7 @@ sequenceDiagram
 <ul>
   <li>Ruby &gt;= 3.4.0</li>
   <li>POSIX system (Linux or macOS)</li>
-  <li>Go (optional, for <code>rperf report</code> and <code>rperf diff</code> subcommands)</li>
+  <li>Go (optional, for <code>rperf report</code> with <code>.pb.gz</code> files and <code>rperf diff</code>)</li>
 </ul>
 
 <h2 id="en--01-introduction--quick-start">1.4 Quick start</h2>
@@ -1950,6 +1950,7 @@ rperf report
 
 <pre><code>Usage: rperf record [options] command [args...]
        rperf stat [options] command [args...]
+       rperf exec [options] command [args...]
        rperf report [options] [file]
        rperf diff [options] base.pb.gz target.pb.gz
        rperf help
@@ -2130,6 +2131,14 @@ Run 'rperf help' for full documentation
       <td>Include flat/cumulative profile tables in output</td>
     </tr>
     <tr>
+      <td><code>--signal VALUE</code></td>
+      <td>Timer signal (Linux only): signal number, or <code>false</code> for nanosleep thread</td>
+    </tr>
+    <tr>
+      <td><code>--no-aggregate</code></td>
+      <td>Disable sample aggregation (keep raw samples)</td>
+    </tr>
+    <tr>
       <td><code>-v</code></td>
       <td>Print additional sampling statistics</td>
     </tr>
@@ -2169,6 +2178,14 @@ Run 'rperf help' for full documentation
     <tr>
       <td><code>-m MODE</code></td>
       <td><code>cpu</code> or <code>wall</code> (default: <code>wall</code>)</td>
+    </tr>
+    <tr>
+      <td><code>--signal VALUE</code></td>
+      <td>Timer signal (Linux only): signal number, or <code>false</code> for nanosleep thread</td>
+    </tr>
+    <tr>
+      <td><code>--no-aggregate</code></td>
+      <td>Disable sample aggregation (keep raw samples)</td>
     </tr>
     <tr>
       <td><code>-v</code></td>
@@ -2284,11 +2301,11 @@ Samples: 80, Frequency: 1000Hz
 <div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>rperf record <span class="nt">-v</span> ruby my_app.rb
 </code></pre></div></div>
 
-<pre><code>[rperf] mode=cpu frequency=1000Hz
-[rperf] sampling: 98 calls, 0.11ms total, 1.1us/call avg
-[rperf] samples recorded: 904
-[rperf] top 10 by flat:
-[rperf]       53.4ms  50.1%  Object#cpu_work (-e)
+<pre><code>[Rperf] mode=cpu frequency=1000Hz
+[Rperf] sampling: 98 calls, 0.11ms total, 1.1us/call avg
+[Rperf] samples recorded: 904
+[Rperf] top 10 by flat:
+[Rperf]       53.4ms  50.1%  Object#cpu_work (-e)
 [rperf]       17.0ms  15.9%  Integer#times (&lt;internal:numeric&gt;)
 ...
 </code></pre>
@@ -2327,6 +2344,14 @@ Samples: 80, Frequency: 1000Hz
       <td>Print text profile to stdout (same as <code>--format=text --output=/dev/stdout</code>)</td>
     </tr>
     <tr>
+      <td><code>--signal VALUE</code></td>
+      <td>Timer signal (Linux only): signal number, or <code>false</code> for nanosleep thread</td>
+    </tr>
+    <tr>
+      <td><code>--no-aggregate</code></td>
+      <td>Disable sample aggregation (keep raw samples)</td>
+    </tr>
+    <tr>
       <td><code>-v</code></td>
       <td>Print sampling statistics to stderr</td>
     </tr>
@@ -2360,12 +2385,16 @@ rperf report <span class="nt">--text</span>
 <div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>rperf report <span class="nt">--top</span> rperf.json.gz
 </code></pre></div></div>
 
-<pre><code>Type: cpu
-Showing nodes accounting for 577.31ms, 100% of 577.31ms total
-      flat  flat%   sum%        cum   cum%
-  577.31ms   100%   100%   577.31ms   100%  Object#fib
-         0     0%   100%   577.31ms   100%  &lt;main&gt;
+<pre><code> Flat:
+        577.3 ms 100.0%  Object#fib (fib.rb)
+          0.0 ms   0.0%  &lt;main&gt; (-e)
+
+ Cumulative:
+        577.3 ms 100.0%  Object#fib (fib.rb)
+        577.3 ms 100.0%  &lt;main&gt; (-e)
 </code></pre>
+
+<p>For <code>.pb.gz</code> files, <code>--top</code> and <code>--text</code> use <code>go tool pprof</code> and produce pprof-formatted output.</p>
 
 <p>The default behavior (without <code>--top</code> or <code>--text</code>) opens the rperf viewer for JSON files, or an interactive web UI powered by <span id="en--03-cli-usage--cite-0">pprof<sup class="cite-ref"><a href="#bib-ren2010" title="Gang Ren and Eric Tune and Tipp Moseley and Yixin Shi and Silvius Rus and Robert Hundt. Google-Wide Profiling: A Continuous Profiling Infrastructure for Data Centers. IEEE Micro. Vol. 30. No. 4. pp. 65--79. 2010." onclick="showChapterAndScroll('__bibliography__', 'bib-ren2010'); return false;">[Gang, 2010]</a></sup></span> for <code>.pb.gz</code> files.</p>
 
@@ -2546,7 +2575,7 @@ Cumulative:
       <td><code>format:</code></td>
       <td>Symbol</td>
       <td><code>nil</code></td>
-      <td><code>:pprof</code>, <code>:collapsed</code>, <code>:text</code>, or <code>nil</code> (auto-detect from output extension)</td>
+      <td><code>:json</code>, <code>:pprof</code>, <code>:collapsed</code>, <code>:text</code>, or <code>nil</code> (auto-detect from output extension)</td>
     </tr>
     <tr>
       <td><code>signal:</code></td>
@@ -3495,7 +3524,7 @@ go tool pprof <span class="nt">-tagroot</span><span class="o">=</span>job profil
 
 <h2 id="en--07-framework-integration--in-browser-viewer">7.4 In-browser viewer</h2>
 
-<p><code>Rperf::Viewer</code> is a Rack middleware that serves an interactive profiling UI at a configurable mount path. It stores snapshots in memory and renders them in the browser using <a href="https://github.com/nicedoc/d3-flame-graph">d3-flame-graph</a>. No external dependencies or build tools are required — the HTML, CSS, and JavaScript are all self-contained.</p>
+<p><code>Rperf::Viewer</code> is a Rack middleware that serves an interactive profiling UI at a configurable mount path. It stores snapshots in memory and renders them in the browser using <a href="https://github.com/nicedoc/d3-flame-graph">d3-flame-graph</a>. No gem dependencies or build tools are required. The viewer loads <a href="https://github.com/nicedoc/d3-flame-graph">d3-flame-graph</a> from a CDN at runtime, so an internet connection is needed on first access.</p>
 
 <div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">require</span> <span class="s2">"rperf/viewer"</span>
 </code></pre></div></div>
@@ -3588,7 +3617,7 @@ go tool pprof <span class="nt">-tagroot</span><span class="o">=</span>job profil
 <span class="c1"># config/routes.rb</span>
 <span class="nb">require</span> <span class="s2">"rperf/viewer"</span>
 <span class="n">constraints</span> <span class="o">-&gt;</span><span class="p">(</span><span class="n">req</span><span class="p">)</span> <span class="p">{</span> <span class="n">req</span><span class="p">.</span><span class="nf">session</span><span class="p">[</span><span class="ss">:admin</span><span class="p">]</span> <span class="p">}</span> <span class="k">do</span>
-  <span class="n">mount</span> <span class="no">Rperf</span><span class="o">::</span><span class="no">Viewer</span><span class="p">.</span><span class="nf">new</span><span class="p">(</span><span class="kp">nil</span><span class="p">),</span> <span class="ss">at: </span><span class="s2">"/rperf"</span>
+  <span class="n">mount</span> <span class="no">Rperf</span><span class="o">::</span><span class="no">Viewer</span><span class="p">.</span><span class="nf">new</span><span class="p">(</span><span class="kp">nil</span><span class="p">,</span> <span class="ss">path: </span><span class="s2">""</span><span class="p">),</span> <span class="ss">at: </span><span class="s2">"/rperf"</span>
 <span class="k">end</span>
 </code></pre></div></div>
 
@@ -4407,6 +4436,11 @@ rperf <span class="nb">help</span>
       <td><code>0</code></td>
       <td>Disable sample aggregation (return raw samples)</td>
     </tr>
+    <tr>
+      <td><code>RPERF_SIGNAL</code></td>
+      <td>integer or <code>false</code></td>
+      <td>Timer signal (Linux only): signal number, or <code>false</code> for nanosleep thread</td>
+    </tr>
   </tbody>
 </table>
 
@@ -4555,8 +4589,8 @@ rperf <span class="nb">help</span>
       <h2 class="index-letter">C</h2>
       <dl class="index-entries">
         <dt>collapsed stacks</dt>
-        <dd><a href="#en--01-introduction--idx-9" onclick="showChapterAndScroll('en--01-introduction', 'en--01-introduction--idx-9'); return false;">1. Introduction</a></dd>
-        <dd><a href="#en--01-introduction--idx-16" onclick="showChapterAndScroll('en--01-introduction', 'en--01-introduction--idx-16'); return false;">1. Introduction</a></dd>
+        <dd><a href="#en--01-introduction--idx-10" onclick="showChapterAndScroll('en--01-introduction', 'en--01-introduction--idx-10'); return false;">1. Introduction</a></dd>
+        <dd><a href="#en--01-introduction--idx-18" onclick="showChapterAndScroll('en--01-introduction', 'en--01-introduction--idx-18'); return false;">1. Introduction</a></dd>
         <dd><a href="#en--06-output-formats--idx-3" onclick="showChapterAndScroll('en--06-output-formats', 'en--06-output-formats--idx-3'); return false;">6. Output Formats</a></dd>
         <dt>cpu mode</dt>
         <dd><a href="#en--03-cli-usage--idx-5" onclick="showChapterAndScroll('en--03-cli-usage', 'en--03-cli-usage--idx-5'); return false;">3. CLI Usage</a></dd>
@@ -4593,6 +4627,9 @@ rperf <span class="nb">help</span>
     <div class="index-group">
       <h2 class="index-letter">J</h2>
       <dl class="index-entries">
+        <dt>JSON</dt>
+        <dd><a href="#en--01-introduction--idx-8" onclick="showChapterAndScroll('en--01-introduction', 'en--01-introduction--idx-8'); return false;">1. Introduction</a></dd>
+        <dd><a href="#en--01-introduction--idx-16" onclick="showChapterAndScroll('en--01-introduction', 'en--01-introduction--idx-16'); return false;">1. Introduction</a></dd>
         <dt>json</dt>
         <dd><a href="#en--06-output-formats--idx-0" onclick="showChapterAndScroll('en--06-output-formats', 'en--06-output-formats--idx-0'); return false;">6. Output Formats</a></dd>
       </dl>
@@ -4602,10 +4639,10 @@ rperf <span class="nb">help</span>
       <dl class="index-entries">
         <dt>postponed job</dt>
         <dd><a href="#en--01-introduction--idx-6" onclick="showChapterAndScroll('en--01-introduction', 'en--01-introduction--idx-6'); return false;">1. Introduction</a></dd>
-        <dd><a href="#en--01-introduction--idx-10" onclick="showChapterAndScroll('en--01-introduction', 'en--01-introduction--idx-10'); return false;">1. Introduction</a></dd>
+        <dd><a href="#en--01-introduction--idx-11" onclick="showChapterAndScroll('en--01-introduction', 'en--01-introduction--idx-11'); return false;">1. Introduction</a></dd>
         <dt>pprof</dt>
-        <dd><a href="#en--01-introduction--idx-8" onclick="showChapterAndScroll('en--01-introduction', 'en--01-introduction--idx-8'); return false;">1. Introduction</a></dd>
-        <dd><a href="#en--01-introduction--idx-15" onclick="showChapterAndScroll('en--01-introduction', 'en--01-introduction--idx-15'); return false;">1. Introduction</a></dd>
+        <dd><a href="#en--01-introduction--idx-9" onclick="showChapterAndScroll('en--01-introduction', 'en--01-introduction--idx-9'); return false;">1. Introduction</a></dd>
+        <dd><a href="#en--01-introduction--idx-17" onclick="showChapterAndScroll('en--01-introduction', 'en--01-introduction--idx-17'); return false;">1. Introduction</a></dd>
         <dd><a href="#en--04-library-usage--idx-6" onclick="showChapterAndScroll('en--04-library-usage', 'en--04-library-usage--idx-6'); return false;">4. Ruby API</a></dd>
         <dd><a href="#en--06-output-formats--idx-1" onclick="showChapterAndScroll('en--06-output-formats', 'en--06-output-formats--idx-1'); return false;">6. Output Formats</a></dd>
       </dl>
@@ -4641,13 +4678,13 @@ rperf <span class="nb">help</span>
         <dt>rperf exec</dt>
         <dd><a href="#en--03-cli-usage--idx-2" onclick="showChapterAndScroll('en--03-cli-usage', 'en--03-cli-usage--idx-2'); return false;">3. CLI Usage</a></dd>
         <dt>rperf record</dt>
-        <dd><a href="#en--01-introduction--idx-13" onclick="showChapterAndScroll('en--01-introduction', 'en--01-introduction--idx-13'); return false;">1. Introduction</a></dd>
+        <dd><a href="#en--01-introduction--idx-14" onclick="showChapterAndScroll('en--01-introduction', 'en--01-introduction--idx-14'); return false;">1. Introduction</a></dd>
         <dd><a href="#en--03-cli-usage--idx-4" onclick="showChapterAndScroll('en--03-cli-usage', 'en--03-cli-usage--idx-4'); return false;">3. CLI Usage</a></dd>
         <dt>rperf report</dt>
-        <dd><a href="#en--01-introduction--idx-14" onclick="showChapterAndScroll('en--01-introduction', 'en--01-introduction--idx-14'); return false;">1. Introduction</a></dd>
+        <dd><a href="#en--01-introduction--idx-15" onclick="showChapterAndScroll('en--01-introduction', 'en--01-introduction--idx-15'); return false;">1. Introduction</a></dd>
         <dd><a href="#en--03-cli-usage--idx-7" onclick="showChapterAndScroll('en--03-cli-usage', 'en--03-cli-usage--idx-7'); return false;">3. CLI Usage</a></dd>
         <dt>rperf stat</dt>
-        <dd><a href="#en--01-introduction--idx-12" onclick="showChapterAndScroll('en--01-introduction', 'en--01-introduction--idx-12'); return false;">1. Introduction</a></dd>
+        <dd><a href="#en--01-introduction--idx-13" onclick="showChapterAndScroll('en--01-introduction', 'en--01-introduction--idx-13'); return false;">1. Introduction</a></dd>
         <dd><a href="#en--03-cli-usage--idx-0" onclick="showChapterAndScroll('en--03-cli-usage', 'en--03-cli-usage--idx-0'); return false;">3. CLI Usage</a></dd>
       </dl>
     </div>
@@ -4656,7 +4693,7 @@ rperf <span class="nb">help</span>
       <dl class="index-entries">
         <dt>safepoint</dt>
         <dd><a href="#en--01-introduction--idx-1" onclick="showChapterAndScroll('en--01-introduction', 'en--01-introduction--idx-1'); return false;">1. Introduction</a></dd>
-        <dd><a href="#en--01-introduction--idx-11" onclick="showChapterAndScroll('en--01-introduction', 'en--01-introduction--idx-11'); return false;">1. Introduction</a></dd>
+        <dd><a href="#en--01-introduction--idx-12" onclick="showChapterAndScroll('en--01-introduction', 'en--01-introduction--idx-12'); return false;">1. Introduction</a></dd>
         <dt>safepoint bias</dt>
         <dd><a href="#en--01-introduction--idx-5" onclick="showChapterAndScroll('en--01-introduction', 'en--01-introduction--idx-5'); return false;">1. Introduction</a></dd>
         <dd><a href="#en--01-introduction--idx-7" onclick="showChapterAndScroll('en--01-introduction', 'en--01-introduction--idx-7'); return false;">1. Introduction</a></dd>
@@ -4685,7 +4722,7 @@ rperf <span class="nb">help</span>
 
 <p>Ruby 向けのセーフポイントベースのサンプリング性能プロファイラ。</p>
 
-<p>rperf は、セーフポイントでサンプリングを行い、実際の時間差分を重みとして使用することでセーフポイントバイアスを補正する Ruby プログラムのプロファイラです。<code>perf</code> ライクな CLI、Ruby API を提供し、pprof、collapsed stacks、テキストレポート形式で出力します。</p>
+<p>rperf は、セーフポイントでサンプリングを行い、実際の時間差分を重みとして使用することでセーフポイントバイアスを補正する Ruby プログラムのプロファイラです。<code>perf</code> ライクな CLI、Ruby API を提供し、JSON、pprof、collapsed stacks、テキストレポート形式で出力します。</p>
 
 <p><strong>主な特徴:</strong></p>
 
@@ -4693,7 +4730,7 @@ rperf <span class="nb">help</span>
   <li>CPU モードとウォールクロックモード</li>
   <li>セーフポイントバイアスを補正する時間重み付きサンプリング</li>
   <li>GVL 競合と GC フェーズの追跡</li>
-  <li>pprof、collapsed stacks、テキスト出力形式</li>
+  <li>JSON（ネイティブ）、pprof、collapsed stacks、テキスト出力形式</li>
   <li>低オーバーヘッド (デフォルト 1000 Hz でのサンプリングコールバックコスト &lt; 0.2%)</li>
   <li>Ruby &gt;= 3.4.0、POSIX システム (Linux, macOS) が必要</li>
 </ul>
@@ -4923,7 +4960,7 @@ rperf <span class="nb">help</span>
 <ul>
   <li><strong>正確なプロファイリング</strong>: 時間差分重み付けが<span id="ja--01-introduction--idx-7">セーフポイントバイアス</span>を補正し、従来のカウントベースのプロファイラよりも実際の時間分布に近い結果を生成します。</li>
   <li><strong>GVL / GC の可視化</strong>: wall モードでは、GVL 外のブロッキング、GVL 競合、GC marking/sweeping をサンプルラベル（<code>%GVL</code>、<code>%GC</code>）として追跡します。別途ツールは不要です。</li>
-  <li><strong>標準出力形式</strong>: <span id="ja--01-introduction--idx-8">pprof</span> protobuf（<code>go tool pprof</code> と互換）、<span id="ja--01-introduction--idx-9">collapsed stacks</span>（フレームグラフ / speedscope 向け）、人間が読めるテキスト形式で出力します。</li>
+  <li><strong>標準出力形式</strong>: <span id="ja--01-introduction--idx-8">JSON</span>（rperf ネイティブ、デフォルト）、<span id="ja--01-introduction--idx-9">pprof</span> protobuf（<code>go tool pprof</code> と互換）、<span id="ja--01-introduction--idx-10">collapsed stacks</span>（フレームグラフ / speedscope 向け）、人間が読めるテキスト形式で出力します。</li>
   <li><strong>低オーバーヘッド</strong>: デフォルト 1000 Hz でのサンプリングコールバックコストは &lt; 0.2% で、本番環境での使用に適しています。</li>
   <li><strong>シンプルな CLI</strong>: <code>rperf stat</code> で概要を素早く確認し、<code>rperf record</code> + <code>rperf report</code> で詳細な分析が可能です。</li>
 </ul>
@@ -4946,7 +4983,7 @@ rperf <span class="nb">help</span>
 
 <p>多くの Ruby サンプリングプロファイラは、シグナルハンドラ内で直接 <code>rb_profile_frames</code> を呼び出してバックトレースを収集します。このアプローチはシグナルの実際のタイミングでバックトレースを取得できますが、文書化されていない VM 内部の状態に依存しています。<code>rb_profile_frames</code> は async-signal-safe であることが保証されておらず、VM が内部構造を更新中の場合、結果が不正確になる可能性があります。</p>
 
-<p>rperf は異なるアプローチを取ります。シグナルハンドラから安全に処理を遅延させるための Ruby VM の公式 API である <span id="ja--01-introduction--idx-10">postponed job</span> メカニズム（<code>rb_postponed_job</code>）を使用します。バックトレースの収集は次の<span id="ja--01-introduction--idx-11">セーフポイント</span>まで遅延されます。セーフポイントとは、VM が一貫した状態にあり、<code>rb_profile_frames</code> が信頼性の高い結果を返せるポイントです。タイマーがセーフポイント間で発火した場合、実際のサンプルは次のセーフポイントまで遅延されるというトレードオフがあります。</p>
+<p>rperf は異なるアプローチを取ります。シグナルハンドラから安全に処理を遅延させるための Ruby VM の公式 API である <span id="ja--01-introduction--idx-11">postponed job</span> メカニズム（<code>rb_postponed_job</code>）を使用します。バックトレースの収集は次の<span id="ja--01-introduction--idx-12">セーフポイント</span>まで遅延されます。セーフポイントとは、VM が一貫した状態にあり、<code>rb_profile_frames</code> が信頼性の高い結果を返せるポイントです。タイマーがセーフポイント間で発火した場合、実際のサンプルは次のセーフポイントまで遅延されるというトレードオフがあります。</p>
 
 <p>各サンプルが均等にカウントされる場合（重み = 1）、長時間実行される C メソッドによって遅延されたサンプルは、即座に取得されたサンプルと同じ重みを持つことになります。これが<span id="ja--01-introduction--cite-2">セーフポイントバイアス<sup class="cite-ref"><a href="#bib-mytkowicz2010" title="Todd Mytkowicz and Amer Diwan and Matthias Hauswirth and Peter F. Sweeney. Evaluating the Accuracy of Java Profilers. ACM. pp. 187--197. 2010." onclick="showChapterAndScroll('__bibliography__', 'bib-mytkowicz2010'); return false;">[Todd, 2010]</a></sup></span>問題です。スレッドがセーフポイントに到達したときに実行中の関数がそうでない場合よりも多く出現し、セーフポイント間の関数は過小評価されます。</p>
 
@@ -4983,8 +5020,8 @@ sequenceDiagram
 
 <ul>
   <li><strong>GVL と GC の認識</strong>: wall モードでは、rperf は GVL 外でのブロック時間、GVL の再取得待ち時間、GC の marking/sweeping フェーズの時間を、サンプルラベル（<code>%GVL=blocked</code>/<code>wait</code>、<code>%GC=mark</code>/<code>sweep</code>）として追跡します。これらはユーザーラベルと同様に <code>label_sets</code> に格納され、pprof で <code>-tagfocus</code> 等を使ってフィルタリングできます。</li>
-  <li><strong>perf ライクな CLI</strong>: <span id="ja--01-introduction--idx-12"><code>rperf stat</code></span> コマンドで性能の概要を素早く確認でき（<code>perf stat</code> のように）、<span id="ja--01-introduction--idx-13"><code>rperf record</code></span> + <span id="ja--01-introduction--idx-14"><code>rperf report</code></span> で詳細なプロファイリングが可能です。</li>
-  <li><strong>標準出力</strong>: rperf は <span id="ja--01-introduction--idx-15">pprof</span> protobuf 形式で出力し、Go の <code>pprof</code> ツールエコシステムと互換性があります。<span id="ja--01-introduction--cite-3">フレームグラフ<sup class="cite-ref"><a href="#bib-gregg2016" title="Brendan Gregg. The Flame Graph. Communications of the ACM. Vol. 59. No. 6. pp. 48--57. 2016." onclick="showChapterAndScroll('__bibliography__', 'bib-gregg2016'); return false;">[Brendan, 2016]</a></sup></span>や speedscope 向けの <span id="ja--01-introduction--idx-16">collapsed stacks</span> 形式もサポートしています。</li>
+  <li><strong>perf ライクな CLI</strong>: <span id="ja--01-introduction--idx-13"><code>rperf stat</code></span> コマンドで性能の概要を素早く確認でき（<code>perf stat</code> のように）、<span id="ja--01-introduction--idx-14"><code>rperf record</code></span> + <span id="ja--01-introduction--idx-15"><code>rperf report</code></span> で詳細なプロファイリングが可能です。</li>
+  <li><strong>標準出力</strong>: rperf は <span id="ja--01-introduction--idx-16">JSON</span>（ネイティブ形式、デフォルト）、<span id="ja--01-introduction--idx-17">pprof</span> protobuf 形式（Go の <code>pprof</code> ツールエコシステムと互換）、<span id="ja--01-introduction--idx-18">collapsed stacks</span>（<span id="ja--01-introduction--cite-3">フレームグラフ<sup class="cite-ref"><a href="#bib-gregg2016" title="Brendan Gregg. The Flame Graph. Communications of the ACM. Vol. 59. No. 6. pp. 48--57. 2016." onclick="showChapterAndScroll('__bibliography__', 'bib-gregg2016'); return false;">[Brendan, 2016]</a></sup></span>や speedscope 向け）、人間が読めるテキスト形式で出力します。</li>
   <li><strong>低オーバーヘッド</strong>: デフォルト 1000 Hz でのサンプリングコールバックコストは &lt; 0.2% で、本番環境での使用に適しています。</li>
 </ul>
 
@@ -4993,7 +5030,7 @@ sequenceDiagram
 <ul>
   <li>Ruby &gt;= 3.4.0</li>
   <li>POSIX システム (Linux または macOS)</li>
-  <li>Go (オプション、<code>rperf report</code> および <code>rperf diff</code> サブコマンド用)</li>
+  <li>Go (オプション、<code>rperf report</code> で <code>.pb.gz</code> ファイルと <code>rperf diff</code> サブコマンド用)</li>
 </ul>
 
 <h2 id="ja--01-introduction--クイックスタート">1.4 クイックスタート</h2>
@@ -5060,6 +5097,7 @@ rperf report
 
 <pre><code>Usage: rperf record [options] command [args...]
        rperf stat [options] command [args...]
+       rperf exec [options] command [args...]
        rperf report [options] [file]
        rperf diff [options] base.pb.gz target.pb.gz
        rperf help
@@ -5240,6 +5278,14 @@ Run 'rperf help' for full documentation
       <td>フラット/キュムレイティブなプロファイルテーブルを出力に含める</td>
     </tr>
     <tr>
+      <td><code>--signal VALUE</code></td>
+      <td>タイマーシグナル (Linux のみ): シグナル番号、または <code>false</code> で nanosleep スレッド</td>
+    </tr>
+    <tr>
+      <td><code>--no-aggregate</code></td>
+      <td>サンプル集約を無効化（生サンプルを保持）</td>
+    </tr>
+    <tr>
       <td><code>-v</code></td>
       <td>追加のサンプリング統計を出力</td>
     </tr>
@@ -5279,6 +5325,14 @@ Run 'rperf help' for full documentation
     <tr>
       <td><code>-m MODE</code></td>
       <td><code>cpu</code> または <code>wall</code> (デフォルト: <code>wall</code>)</td>
+    </tr>
+    <tr>
+      <td><code>--signal VALUE</code></td>
+      <td>タイマーシグナル (Linux のみ): シグナル番号、または <code>false</code> で nanosleep スレッド</td>
+    </tr>
+    <tr>
+      <td><code>--no-aggregate</code></td>
+      <td>サンプル集約を無効化（生サンプルを保持）</td>
     </tr>
     <tr>
       <td><code>-v</code></td>
@@ -5394,12 +5448,12 @@ Samples: 80, Frequency: 1000Hz
 <div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>rperf record <span class="nt">-v</span> ruby my_app.rb
 </code></pre></div></div>
 
-<pre><code>[rperf] mode=cpu frequency=1000Hz
-[rperf] sampling: 98 calls, 0.11ms total, 1.1us/call avg
-[rperf] samples recorded: 904
-[rperf] top 10 by flat:
-[rperf]       53.4ms  50.1%  Object#cpu_work (-e)
-[rperf]       17.0ms  15.9%  Integer#times (&lt;internal:numeric&gt;)
+<pre><code>[Rperf] mode=cpu frequency=1000Hz
+[Rperf] sampling: 98 calls, 0.11ms total, 1.1us/call avg
+[Rperf] samples recorded: 904
+[Rperf] top 10 by flat:
+[Rperf]       53.4ms  50.1%  Object#cpu_work (-e)
+[Rperf]       17.0ms  15.9%  Integer#times (&lt;internal:numeric&gt;)
 ...
 </code></pre>
 
@@ -5437,6 +5491,14 @@ Samples: 80, Frequency: 1000Hz
       <td>テキストプロファイルを stdout に出力 (<code>--format=text --output=/dev/stdout</code> と同等)</td>
     </tr>
     <tr>
+      <td><code>--signal VALUE</code></td>
+      <td>タイマーシグナル (Linux のみ): シグナル番号、または <code>false</code> で nanosleep スレッド</td>
+    </tr>
+    <tr>
+      <td><code>--no-aggregate</code></td>
+      <td>サンプル集約を無効化（生サンプルを保持）</td>
+    </tr>
+    <tr>
       <td><code>-v</code></td>
       <td>サンプリング統計を stderr に出力</td>
     </tr>
@@ -5467,12 +5529,16 @@ rperf report <span class="nt">--text</span>
 <div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight"><code>rperf report <span class="nt">--top</span> rperf.json.gz
 </code></pre></div></div>
 
-<pre><code>Type: cpu
-Showing nodes accounting for 577.31ms, 100% of 577.31ms total
-      flat  flat%   sum%        cum   cum%
-  577.31ms   100%   100%   577.31ms   100%  Object#fib
-         0     0%   100%   577.31ms   100%  &lt;main&gt;
+<pre><code> Flat:
+        577.3 ms 100.0%  Object#fib (fib.rb)
+          0.0 ms   0.0%  &lt;main&gt; (-e)
+
+ Cumulative:
+        577.3 ms 100.0%  Object#fib (fib.rb)
+        577.3 ms 100.0%  &lt;main&gt; (-e)
 </code></pre>
+
+<p><code>.pb.gz</code> ファイルの場合、<code>--top</code> と <code>--text</code> は <code>go tool pprof</code> を使用し、pprof 形式の出力を生成します。</p>
 
 <p>デフォルト動作（<code>--top</code> や <code>--text</code> なし）では、フレームグラフ、上位関数ビュー、コールグラフの可視化を備えたインタラクティブな Web UI がブラウザで開きます。JSON 形式では rperf 組み込みビューア、pprof 形式では <span id="ja--03-cli-usage--cite-0">pprof<sup class="cite-ref"><a href="#bib-ren2010" title="Gang Ren and Eric Tune and Tipp Moseley and Yixin Shi and Silvius Rus and Robert Hundt. Google-Wide Profiling: A Continuous Profiling Infrastructure for Data Centers. IEEE Micro. Vol. 30. No. 4. pp. 65--79. 2010." onclick="showChapterAndScroll('__bibliography__', 'bib-ren2010'); return false;">[Gang, 2010]</a></sup></span> を利用します。</p>
 
@@ -5653,7 +5719,7 @@ Cumulative:
       <td><code>format:</code></td>
       <td>Symbol</td>
       <td><code>nil</code></td>
-      <td><code>:pprof</code>、<code>:collapsed</code>、<code>:text</code>、または <code>nil</code>（output 拡張子から自動検出）</td>
+      <td><code>:json</code>、<code>:pprof</code>、<code>:collapsed</code>、<code>:text</code>、または <code>nil</code>（output 拡張子から自動検出）</td>
     </tr>
     <tr>
       <td><code>signal:</code></td>
@@ -6600,7 +6666,7 @@ go tool pprof <span class="nt">-tagroot</span><span class="o">=</span>job profil
 
 <h2 id="ja--07-framework-integration--ブラウザ内ビューア">7.4 ブラウザ内ビューア</h2>
 
-<p><code>Rperf::Viewer</code> は、設定可能なマウントパスでインタラクティブなプロファイリング UI を提供する Rack ミドルウェアです。スナップショットをメモリに保持し、<a href="https://github.com/nicedoc/d3-flame-graph">d3-flame-graph</a> を使ってブラウザ内で描画します。外部依存やビルドツールは不要です — HTML、CSS、JavaScript はすべて自己完結しています。</p>
+<p><code>Rperf::Viewer</code> は、設定可能なマウントパスでインタラクティブなプロファイリング UI を提供する Rack ミドルウェアです。スナップショットをメモリに保持し、<a href="https://github.com/nicedoc/d3-flame-graph">d3-flame-graph</a> を使ってブラウザ内で描画します。gem の依存やビルドツールは不要です。ビューアは実行時に CDN から <a href="https://github.com/nicedoc/d3-flame-graph">d3-flame-graph</a> を読み込むため、初回アクセス時にインターネット接続が必要です。</p>
 
 <div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">require</span> <span class="s2">"rperf/viewer"</span>
 </code></pre></div></div>
@@ -6693,7 +6759,7 @@ go tool pprof <span class="nt">-tagroot</span><span class="o">=</span>job profil
 <span class="c1"># config/routes.rb</span>
 <span class="nb">require</span> <span class="s2">"rperf/viewer"</span>
 <span class="n">constraints</span> <span class="o">-&gt;</span><span class="p">(</span><span class="n">req</span><span class="p">)</span> <span class="p">{</span> <span class="n">req</span><span class="p">.</span><span class="nf">session</span><span class="p">[</span><span class="ss">:admin</span><span class="p">]</span> <span class="p">}</span> <span class="k">do</span>
-  <span class="n">mount</span> <span class="no">Rperf</span><span class="o">::</span><span class="no">Viewer</span><span class="p">.</span><span class="nf">new</span><span class="p">(</span><span class="kp">nil</span><span class="p">),</span> <span class="ss">at: </span><span class="s2">"/rperf"</span>
+  <span class="n">mount</span> <span class="no">Rperf</span><span class="o">::</span><span class="no">Viewer</span><span class="p">.</span><span class="nf">new</span><span class="p">(</span><span class="kp">nil</span><span class="p">,</span> <span class="ss">path: </span><span class="s2">""</span><span class="p">),</span> <span class="ss">at: </span><span class="s2">"/rperf"</span>
 <span class="k">end</span>
 </code></pre></div></div>
 
@@ -7514,6 +7580,11 @@ rperf <span class="nb">help</span>
       <td><code>0</code></td>
       <td>サンプル集約を無効化（生サンプルを返す）</td>
     </tr>
+    <tr>
+      <td><code>RPERF_SIGNAL</code></td>
+      <td>integer または <code>false</code></td>
+      <td>タイマーシグナル (Linux のみ): シグナル番号、または <code>false</code> で nanosleep スレッド</td>
+    </tr>
   </tbody>
 </table>
 
@@ -7657,8 +7728,8 @@ rperf <span class="nb">help</span>
       <h2 class="index-letter">C</h2>
       <dl class="index-entries">
         <dt>collapsed stacks</dt>
-        <dd><a href="#ja--01-introduction--idx-9" onclick="showChapterAndScroll('ja--01-introduction', 'ja--01-introduction--idx-9'); return false;">1. イントロダクション</a></dd>
-        <dd><a href="#ja--01-introduction--idx-16" onclick="showChapterAndScroll('ja--01-introduction', 'ja--01-introduction--idx-16'); return false;">1. イントロダクション</a></dd>
+        <dd><a href="#ja--01-introduction--idx-10" onclick="showChapterAndScroll('ja--01-introduction', 'ja--01-introduction--idx-10'); return false;">1. イントロダクション</a></dd>
+        <dd><a href="#ja--01-introduction--idx-18" onclick="showChapterAndScroll('ja--01-introduction', 'ja--01-introduction--idx-18'); return false;">1. イントロダクション</a></dd>
         <dd><a href="#ja--06-output-formats--idx-3" onclick="showChapterAndScroll('ja--06-output-formats', 'ja--06-output-formats--idx-3'); return false;">6. 出力形式</a></dd>
         <dt>cpu mode</dt>
         <dd><a href="#ja--03-cli-usage--idx-5" onclick="showChapterAndScroll('ja--03-cli-usage', 'ja--03-cli-usage--idx-5'); return false;">3. CLI の使い方</a></dd>
@@ -7695,6 +7766,9 @@ rperf <span class="nb">help</span>
     <div class="index-group">
       <h2 class="index-letter">J</h2>
       <dl class="index-entries">
+        <dt>JSON</dt>
+        <dd><a href="#ja--01-introduction--idx-8" onclick="showChapterAndScroll('ja--01-introduction', 'ja--01-introduction--idx-8'); return false;">1. イントロダクション</a></dd>
+        <dd><a href="#ja--01-introduction--idx-16" onclick="showChapterAndScroll('ja--01-introduction', 'ja--01-introduction--idx-16'); return false;">1. イントロダクション</a></dd>
         <dt>json</dt>
         <dd><a href="#ja--06-output-formats--idx-0" onclick="showChapterAndScroll('ja--06-output-formats', 'ja--06-output-formats--idx-0'); return false;">6. 出力形式</a></dd>
       </dl>
@@ -7704,10 +7778,10 @@ rperf <span class="nb">help</span>
       <dl class="index-entries">
         <dt>postponed job</dt>
         <dd><a href="#ja--01-introduction--idx-5" onclick="showChapterAndScroll('ja--01-introduction', 'ja--01-introduction--idx-5'); return false;">1. イントロダクション</a></dd>
-        <dd><a href="#ja--01-introduction--idx-10" onclick="showChapterAndScroll('ja--01-introduction', 'ja--01-introduction--idx-10'); return false;">1. イントロダクション</a></dd>
+        <dd><a href="#ja--01-introduction--idx-11" onclick="showChapterAndScroll('ja--01-introduction', 'ja--01-introduction--idx-11'); return false;">1. イントロダクション</a></dd>
         <dt>pprof</dt>
-        <dd><a href="#ja--01-introduction--idx-8" onclick="showChapterAndScroll('ja--01-introduction', 'ja--01-introduction--idx-8'); return false;">1. イントロダクション</a></dd>
-        <dd><a href="#ja--01-introduction--idx-15" onclick="showChapterAndScroll('ja--01-introduction', 'ja--01-introduction--idx-15'); return false;">1. イントロダクション</a></dd>
+        <dd><a href="#ja--01-introduction--idx-9" onclick="showChapterAndScroll('ja--01-introduction', 'ja--01-introduction--idx-9'); return false;">1. イントロダクション</a></dd>
+        <dd><a href="#ja--01-introduction--idx-17" onclick="showChapterAndScroll('ja--01-introduction', 'ja--01-introduction--idx-17'); return false;">1. イントロダクション</a></dd>
         <dd><a href="#ja--04-library-usage--idx-6" onclick="showChapterAndScroll('ja--04-library-usage', 'ja--04-library-usage--idx-6'); return false;">4. Ruby API</a></dd>
         <dd><a href="#ja--06-output-formats--idx-1" onclick="showChapterAndScroll('ja--06-output-formats', 'ja--06-output-formats--idx-1'); return false;">6. 出力形式</a></dd>
       </dl>
@@ -7743,13 +7817,13 @@ rperf <span class="nb">help</span>
         <dt>rperf exec</dt>
         <dd><a href="#ja--03-cli-usage--idx-2" onclick="showChapterAndScroll('ja--03-cli-usage', 'ja--03-cli-usage--idx-2'); return false;">3. CLI の使い方</a></dd>
         <dt>rperf record</dt>
-        <dd><a href="#ja--01-introduction--idx-13" onclick="showChapterAndScroll('ja--01-introduction', 'ja--01-introduction--idx-13'); return false;">1. イントロダクション</a></dd>
+        <dd><a href="#ja--01-introduction--idx-14" onclick="showChapterAndScroll('ja--01-introduction', 'ja--01-introduction--idx-14'); return false;">1. イントロダクション</a></dd>
         <dd><a href="#ja--03-cli-usage--idx-4" onclick="showChapterAndScroll('ja--03-cli-usage', 'ja--03-cli-usage--idx-4'); return false;">3. CLI の使い方</a></dd>
         <dt>rperf report</dt>
-        <dd><a href="#ja--01-introduction--idx-14" onclick="showChapterAndScroll('ja--01-introduction', 'ja--01-introduction--idx-14'); return false;">1. イントロダクション</a></dd>
+        <dd><a href="#ja--01-introduction--idx-15" onclick="showChapterAndScroll('ja--01-introduction', 'ja--01-introduction--idx-15'); return false;">1. イントロダクション</a></dd>
         <dd><a href="#ja--03-cli-usage--idx-7" onclick="showChapterAndScroll('ja--03-cli-usage', 'ja--03-cli-usage--idx-7'); return false;">3. CLI の使い方</a></dd>
         <dt>rperf stat</dt>
-        <dd><a href="#ja--01-introduction--idx-12" onclick="showChapterAndScroll('ja--01-introduction', 'ja--01-introduction--idx-12'); return false;">1. イントロダクション</a></dd>
+        <dd><a href="#ja--01-introduction--idx-13" onclick="showChapterAndScroll('ja--01-introduction', 'ja--01-introduction--idx-13'); return false;">1. イントロダクション</a></dd>
         <dd><a href="#ja--03-cli-usage--idx-0" onclick="showChapterAndScroll('ja--03-cli-usage', 'ja--03-cli-usage--idx-0'); return false;">3. CLI の使い方</a></dd>
       </dl>
     </div>
@@ -7758,7 +7832,7 @@ rperf <span class="nb">help</span>
       <dl class="index-entries">
         <dt>safepoint</dt>
         <dd><a href="#ja--01-introduction--idx-1" onclick="showChapterAndScroll('ja--01-introduction', 'ja--01-introduction--idx-1'); return false;">1. イントロダクション</a></dd>
-        <dd><a href="#ja--01-introduction--idx-11" onclick="showChapterAndScroll('ja--01-introduction', 'ja--01-introduction--idx-11'); return false;">1. イントロダクション</a></dd>
+        <dd><a href="#ja--01-introduction--idx-12" onclick="showChapterAndScroll('ja--01-introduction', 'ja--01-introduction--idx-12'); return false;">1. イントロダクション</a></dd>
         <dt>safepoint bias</dt>
         <dd><a href="#ja--01-introduction--idx-6" onclick="showChapterAndScroll('ja--01-introduction', 'ja--01-introduction--idx-6'); return false;">1. イントロダクション</a></dd>
         <dd><a href="#ja--01-introduction--idx-7" onclick="showChapterAndScroll('ja--01-introduction', 'ja--01-introduction--idx-7'); return false;">1. イントロダクション</a></dd>

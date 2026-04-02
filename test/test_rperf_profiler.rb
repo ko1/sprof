@@ -269,13 +269,15 @@ class TestRperfProfiler < Test::Unit::TestCase
   def test_verbose_output
     old_stderr = $stderr
     $stderr = StringIO.new
+    begin
+      Rperf.start(frequency: 500, verbose: true)
+      5_000_000.times { 1 + 1 }
+      Rperf.stop
 
-    Rperf.start(frequency: 500, verbose: true)
-    5_000_000.times { 1 + 1 }
-    Rperf.stop
-
-    output = $stderr.string
-    $stderr = old_stderr
+      output = $stderr.string
+    ensure
+      $stderr = old_stderr
+    end
 
     assert_include output, "[Rperf] mode="
     assert_include output, "[Rperf] sampling:"
@@ -285,13 +287,15 @@ class TestRperfProfiler < Test::Unit::TestCase
   def test_verbose_top_tables
     old_stderr = $stderr
     $stderr = StringIO.new
+    begin
+      Rperf.start(frequency: 1000, verbose: true)
+      10_000_000.times { 1 + 1 }
+      Rperf.stop
 
-    Rperf.start(frequency: 1000, verbose: true)
-    10_000_000.times { 1 + 1 }
-    Rperf.stop
-
-    output = $stderr.string
-    $stderr = old_stderr
+      output = $stderr.string
+    ensure
+      $stderr = old_stderr
+    end
 
     assert_include output, "[Rperf] top"
     assert_include output, "by flat:"

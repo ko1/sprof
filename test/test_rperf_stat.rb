@@ -6,13 +6,15 @@ class TestRperfStat < Test::Unit::TestCase
   def test_stat_output
     old_stderr = $stderr
     $stderr = StringIO.new
+    begin
+      Rperf.start(frequency: 500, mode: :wall, stat: true)
+      5_000_000.times { 1 + 1 }
+      data = Rperf.stop
 
-    Rperf.start(frequency: 500, mode: :wall, stat: true)
-    5_000_000.times { 1 + 1 }
-    data = Rperf.stop
-
-    output = $stderr.string
-    $stderr = old_stderr
+      output = $stderr.string
+    ensure
+      $stderr = old_stderr
+    end
 
     assert_not_nil data
     assert_include output, "Performance stats"
@@ -43,14 +45,16 @@ class TestRperfStat < Test::Unit::TestCase
     old_stderr = $stderr
     $stderr = StringIO.new
     ENV["RPERF_STAT_COMMAND"] = "ruby test.rb"
+    begin
+      Rperf.instance_variable_set(:@stat_start_mono,
+        Process.clock_gettime(Process::CLOCK_MONOTONIC) - 0.2)
+      Rperf.print_stat(data)
 
-    Rperf.instance_variable_set(:@stat_start_mono,
-      Process.clock_gettime(Process::CLOCK_MONOTONIC) - 0.2)
-    Rperf.print_stat(data)
-
-    output = $stderr.string
-    $stderr = old_stderr
-    ENV.delete("RPERF_STAT_COMMAND")
+      output = $stderr.string
+    ensure
+      $stderr = old_stderr
+      ENV.delete("RPERF_STAT_COMMAND")
+    end
 
     assert_include output, "Performance stats for 'ruby test.rb'"
     assert_include output, "user"
@@ -90,18 +94,20 @@ class TestRperfStat < Test::Unit::TestCase
     old_stat_report = ENV["RPERF_STAT_REPORT"]
     ENV["RPERF_STAT_REPORT"] = "1"
     ENV["RPERF_STAT_COMMAND"] = "ruby test.rb"
+    begin
+      Rperf.instance_variable_set(:@stat_start_mono,
+        Process.clock_gettime(Process::CLOCK_MONOTONIC) - 0.2)
+      Rperf.print_stat(data)
 
-    Rperf.instance_variable_set(:@stat_start_mono,
-      Process.clock_gettime(Process::CLOCK_MONOTONIC) - 0.2)
-    Rperf.print_stat(data)
-
-    output = $stderr.string
-    $stderr = old_stderr
-    ENV.delete("RPERF_STAT_COMMAND")
-    if old_stat_report
-      ENV["RPERF_STAT_REPORT"] = old_stat_report
-    else
-      ENV.delete("RPERF_STAT_REPORT")
+      output = $stderr.string
+    ensure
+      $stderr = old_stderr
+      ENV.delete("RPERF_STAT_COMMAND")
+      if old_stat_report
+        ENV["RPERF_STAT_REPORT"] = old_stat_report
+      else
+        ENV.delete("RPERF_STAT_REPORT")
+      end
     end
 
     # --report should include text profile tables
@@ -134,14 +140,16 @@ class TestRperfStat < Test::Unit::TestCase
     old_stderr = $stderr
     $stderr = StringIO.new
     ENV["RPERF_STAT_COMMAND"] = "ruby test.rb"
+    begin
+      Rperf.instance_variable_set(:@stat_start_mono,
+        Process.clock_gettime(Process::CLOCK_MONOTONIC) - 0.5)
+      Rperf.print_stat(data)
 
-    Rperf.instance_variable_set(:@stat_start_mono,
-      Process.clock_gettime(Process::CLOCK_MONOTONIC) - 0.5)
-    Rperf.print_stat(data)
-
-    output = $stderr.string
-    $stderr = old_stderr
-    ENV.delete("RPERF_STAT_COMMAND")
+      output = $stderr.string
+    ensure
+      $stderr = old_stderr
+      ENV.delete("RPERF_STAT_COMMAND")
+    end
 
     assert_include output, "[Rperf] CPU execution"
     assert_include output, "[Rperf] GVL blocked"

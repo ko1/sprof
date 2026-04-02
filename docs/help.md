@@ -58,7 +58,7 @@ Like `stat --report`. Uses wall mode by default. No file output by default.
 Shows: user/sys/real time, time breakdown, GC/memory/OS stats, profiler overhead,
 and flat/cumulative top-50 function tables.
 
-### report: Open pprof profile with go tool pprof. Requires Go.
+### report: Open profile viewer or go tool pprof.
 
     --top                   Print top functions by flat time
     --text                  Print text report
@@ -448,7 +448,6 @@ Example output:
 Format is auto-detected from the output file extension:
 
     .json.gz    → json (rperf native, default)
-    .json.gz    → json (rperf native, JSON)
     .pb.gz      → pprof
     .collapsed  → collapsed
     .txt        → text

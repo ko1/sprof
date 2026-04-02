@@ -33,6 +33,7 @@ rperf --help
 ```
 Usage: rperf record [options] command [args...]
        rperf stat [options] command [args...]
+       rperf exec [options] command [args...]
        rperf report [options] [file]
        rperf diff [options] base.pb.gz target.pb.gz
        rperf help

@@ -91,7 +91,7 @@ class Rperf::Viewer
   def serve_html
     logo = LOGO_SVG
       .sub("<svg ", '<svg style="height:36px;width:auto" ')
-    [200, { "content-type" => "text/html; charset=utf-8" }, [VIEWER_HTML.sub("<!-- LOGO -->", logo)]]
+    [200, { "content-type" => "text/html; charset=utf-8" }, [VIEWER_HTML.sub("<!-- LOGO -->") { logo }]]
   end
 
   def serve_snapshot_list
@@ -426,7 +426,8 @@ function getFilteredSamples() {
 
   // tagfocus: keep only samples whose label values match the regex
   if (tagfocus) {
-    var re = new RegExp(tagfocus);
+    try { var re = new RegExp(tagfocus); } catch(e) { /* invalid regex, skip filter */ }
+    if (!re) return filtered;
     filtered = filtered.filter(function(s) {
       if (s.label_set_id === 0) return false;
       var ls = labelSets[s.label_set_id];

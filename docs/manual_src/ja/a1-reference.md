@@ -114,6 +114,7 @@ end
 | `RPERF_STAT_REPORT` | `1` | stat 出力にプロファイルテーブルを含める |
 | `RPERF_STAT_COMMAND` | string | stat 出力ヘッダーに表示するコマンド文字列 |
 | `RPERF_AGGREGATE` | `0` | サンプル集約を無効化（生サンプルを返す） |
+| `RPERF_SIGNAL` | integer または `false` | タイマーシグナル (Linux のみ): シグナル番号、または `false` で nanosleep スレッド |
 
 ## プロファイリングモードの比較
 

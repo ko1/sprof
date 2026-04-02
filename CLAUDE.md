@@ -74,8 +74,8 @@ See `benchmark/README.md` for full documentation.
 - The C extension uses a single global `rperf_profiler_t`. Only one profiling session at a time.
 - `Rperf.start` accepts `signal:` option (Linux only): `nil`/omitted = timer signal (default), `false`/`0` = nanosleep thread, positive integer = specific signal number (SIGKILL/SIGSTOP rejected). Frequency is validated: 1..10000 (10KHz max).
 - C extension exports `_c_start`/`_c_stop`/`_c_snapshot`/`_c_set_label`/`_c_get_label`/`_c_set_label_sets`/`_c_get_label_sets`/`_c_profile_inc`/`_c_profile_dec`/`_c_running?`; Ruby wraps them as `Rperf.start`/`Rperf.stop`/`Rperf.snapshot`/`Rperf.label`/`Rperf.labels`/`Rperf.profile`.
-- Frame pool (`VALUE *frame_pool`, initial ~1MB) stores raw frame VALUEs from `rb_profile_thread_frames` (no synthetic frame VALUEs). A TypedData wrapper with `dmark` using `rb_gc_mark_locations` keeps them alive across GC. Frame table keys array grows dynamically (starts at 4096, 2x on demand) with atomic pointer swaps for GC dmark safety.
-- `rb_profile_thread_frames` writes directly into the frame pool (no intermediate buffer).
+- Frame pool (`VALUE *frame_pool`, initial ~1MB) stores raw frame VALUEs from `rb_profile_frames` (no synthetic frame VALUEs). A TypedData wrapper with `dmark` using `rb_gc_mark_locations` keeps them alive across GC. Frame table keys array grows dynamically (starts at 4096, 2x on demand) with atomic pointer swaps for GC dmark safety.
+- `rb_profile_frames` writes directly into the frame pool (no intermediate buffer).
 - Sample buffer and frame pool both grow by 2x on demand via `realloc`.
 - Per-thread data (`rperf_thread_data_t`) is created via `rperf_thread_data_create()` and tracks per-thread timing state.
 - Thread exit cleanup is handled by `RUBY_INTERNAL_THREAD_EVENT_EXITED` hook. Stop cleans up all live threads' thread-specific data.

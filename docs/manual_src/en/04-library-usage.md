@@ -75,7 +75,7 @@ data = Rperf.stop
 | `mode:` | Symbol | `:cpu` | `:cpu` or `:wall` |
 | `output:` | String | `nil` | File path to write on stop |
 | `verbose:` | Boolean | `false` | Print statistics to stderr |
-| `format:` | Symbol | `nil` | `:pprof`, `:collapsed`, `:text`, or `nil` (auto-detect from output extension) |
+| `format:` | Symbol | `nil` | `:json`, `:pprof`, `:collapsed`, `:text`, or `nil` (auto-detect from output extension) |
 | `signal:` | Integer/Boolean | `nil` | Linux only: `nil` = timer signal (default), `false` = nanosleep thread, positive integer = specific RT signal number |
 | `aggregate:` | Boolean | `true` | Aggregate identical stacks during profiling to reduce memory. `false` returns raw per-sample data |
 | `defer:` | Boolean | `false` | Start with timer paused. Use [`Rperf.profile`](#index:Rperf.profile) blocks to activate sampling for specific sections |

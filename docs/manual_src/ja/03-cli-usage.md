@@ -96,6 +96,8 @@ rperf stat [options] command [args...]
 | `-f HZ` | サンプリング周波数 (Hz) (デフォルト: 1000) |
 | `-m MODE` | `cpu` または `wall` (デフォルト: `wall`) |
 | `--report` | フラット/キュムレイティブなプロファイルテーブルを出力に含める |
+| `--signal VALUE` | タイマーシグナル (Linux のみ): シグナル番号、または `false` で nanosleep スレッド |
+| `--no-aggregate` | サンプル集約を無効化（生サンプルを保持） |
 | `-v` | 追加のサンプリング統計を出力 |
 
 ## rperf exec
@@ -119,6 +121,8 @@ rperf exec [options] command [args...]
 | `-o PATH` | プロファイルをファイルにも保存 (デフォルト: なし) |
 | `-f HZ` | サンプリング周波数 (Hz) (デフォルト: 1000) |
 | `-m MODE` | `cpu` または `wall` (デフォルト: `wall`) |
+| `--signal VALUE` | タイマーシグナル (Linux のみ): シグナル番号、または `false` で nanosleep スレッド |
+| `--no-aggregate` | サンプル集約を無効化（生サンプルを保持） |
 | `-v` | 追加のサンプリング統計を出力 |
 
 ## rperf record
@@ -237,12 +241,12 @@ rperf record -v ruby my_app.rb
 ```
 
 ```
-[rperf] mode=cpu frequency=1000Hz
-[rperf] sampling: 98 calls, 0.11ms total, 1.1us/call avg
-[rperf] samples recorded: 904
-[rperf] top 10 by flat:
-[rperf]       53.4ms  50.1%  Object#cpu_work (-e)
-[rperf]       17.0ms  15.9%  Integer#times (<internal:numeric>)
+[Rperf] mode=cpu frequency=1000Hz
+[Rperf] sampling: 98 calls, 0.11ms total, 1.1us/call avg
+[Rperf] samples recorded: 904
+[Rperf] top 10 by flat:
+[Rperf]       53.4ms  50.1%  Object#cpu_work (-e)
+[Rperf]       17.0ms  15.9%  Integer#times (<internal:numeric>)
 ...
 ```
 
@@ -259,6 +263,8 @@ rperf record [options] command [args...]
 | `-m MODE` | `cpu` または `wall` (デフォルト: `cpu`) |
 | `--format FMT` | `json`、`pprof`、`collapsed`、または `text` (デフォルト: 拡張子から自動検出) |
 | `-p, --print` | テキストプロファイルを stdout に出力 (`--format=text --output=/dev/stdout` と同等) |
+| `--signal VALUE` | タイマーシグナル (Linux のみ): シグナル番号、または `false` で nanosleep スレッド |
+| `--no-aggregate` | サンプル集約を無効化（生サンプルを保持） |
 | `-v` | サンプリング統計を stderr に出力 |
 
 ## rperf report
@@ -288,12 +294,16 @@ rperf report --top rperf.json.gz
 ```
 
 ```
-Type: cpu
-Showing nodes accounting for 577.31ms, 100% of 577.31ms total
-      flat  flat%   sum%        cum   cum%
-  577.31ms   100%   100%   577.31ms   100%  Object#fib
-         0     0%   100%   577.31ms   100%  <main>
+ Flat:
+        577.3 ms 100.0%  Object#fib (fib.rb)
+          0.0 ms   0.0%  <main> (-e)
+
+ Cumulative:
+        577.3 ms 100.0%  Object#fib (fib.rb)
+        577.3 ms 100.0%  <main> (-e)
 ```
+
+`.pb.gz` ファイルの場合、`--top` と `--text` は `go tool pprof` を使用し、pprof 形式の出力を生成します。
 
 デフォルト動作（`--top` や `--text` なし）では、フレームグラフ、上位関数ビュー、コールグラフの可視化を備えたインタラクティブな Web UI がブラウザで開きます。JSON 形式では rperf 組み込みビューア、pprof 形式では [pprof](#cite:ren2010) を利用します。
 

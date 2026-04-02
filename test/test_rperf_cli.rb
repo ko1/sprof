@@ -15,11 +15,6 @@ class TestRperfCli < Test::Unit::TestCase
     [stdout, stderr, status]
   end
 
-  # Run rperf with a short Ruby workload as the command
-  def run_rperf_with_workload(*args, env: {})
-    run_rperf(*args, RbConfig.ruby, "-e", "5_000_000.times { 1 + 1 }", env: env)
-  end
-
   public
 
   # --- help subcommand ---

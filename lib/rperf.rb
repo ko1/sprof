@@ -19,10 +19,11 @@ module Rperf
   @stat_start_mono = nil
 
   # Starts profiling.
-  # format: :pprof, :collapsed, or :text. nil = auto-detect from output extension
+  # format: :json, :pprof, :collapsed, or :text. nil = auto-detect from output extension
+  #   .json.gz   → json (rperf native, default)
   #   .collapsed → collapsed stacks (FlameGraph / speedscope compatible)
   #   .txt       → text report (human/AI readable flat + cumulative table)
-  #   otherwise (.pb.gz etc) → pprof protobuf (gzip compressed)
+  #   .pb.gz     → pprof protobuf (gzip compressed)
   def self.start(frequency: 1000, mode: :cpu, output: nil, verbose: false, format: nil, stat: false, signal: nil, aggregate: true, defer: false)
     raise ArgumentError, "frequency must be a positive integer (got #{frequency.inspect})" unless frequency.is_a?(Integer) && frequency > 0
     raise ArgumentError, "frequency must be <= 10000 (10KHz), got #{frequency}" if frequency > 10_000
@@ -50,8 +51,9 @@ module Rperf
       begin
         yield
       ensure
-        return stop
+        result = stop
       end
+      result
     end
   end
 
@@ -244,10 +246,11 @@ module Rperf
   private_class_method :merge_vm_state_labels!
 
   # Saves profiling data to a file.
-  # format: :pprof, :collapsed, or :text. nil = auto-detect from path extension
+  # format: :json, :pprof, :collapsed, or :text. nil = auto-detect from path extension
+  #   .json.gz   → json (rperf native, default)
   #   .collapsed → collapsed stacks (FlameGraph / speedscope compatible)
   #   .txt       → text report (human/AI readable flat + cumulative table)
-  #   otherwise (.pb.gz etc) → pprof protobuf (gzip compressed)
+  #   .pb.gz     → pprof protobuf (gzip compressed)
   def self.save(path, data, format: nil)
     write_data(path, data, format)
   end
@@ -308,7 +311,6 @@ module Rperf
   def self.print_stats(data)
     count = data[:sampling_count] || 0
     total_ns = data[:sampling_time_ns] || 0
-    sample_count = data[:sampling_count] || 0
     mode = data[:mode] || :cpu
     frequency = data[:frequency] || 0
 
@@ -317,7 +319,7 @@ module Rperf
 
     $stderr.puts "[Rperf] mode=#{mode} frequency=#{frequency}Hz"
     $stderr.puts "[Rperf] sampling: #{count} calls, #{format("%.2f", total_ms)}ms total, #{format("%.1f", avg_us)}us/call avg"
-    $stderr.puts "[Rperf] samples recorded: #{sample_count}"
+    $stderr.puts "[Rperf] samples recorded: #{count}"
 
     print_top(data)
   end

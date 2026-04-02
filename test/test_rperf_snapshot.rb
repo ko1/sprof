@@ -174,10 +174,10 @@ class TestRperfSnapshot < Test::Unit::TestCase
     assert_operator snap2[:aggregated_samples].size, :>, 0
     assert_valid_samples(snap2[:aggregated_samples])
 
-    # snap2 should cover only the post-clear period,
-    # so its sampling_count should be less than snap1's cumulative count
-    # (or at least not include snap1's samples)
-    assert_operator snap2[:sampling_count], :<, snap1[:sampling_count] + snap2[:sampling_count] + 1
+    # Both snapshots cover similar work amounts, so both should have nonzero counts.
+    # The key property is that snap2 was taken after clear, so it only contains
+    # post-clear data (validated more precisely in test_snapshot_clear_resets_stats).
+    assert_operator snap2[:sampling_count], :>, 0
   end
 
   def test_snapshot_clear_resets_stats
