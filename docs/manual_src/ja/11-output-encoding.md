@@ -12,7 +12,13 @@
 
 Ruby の `Rperf.stop` は `merge_vm_state_labels!` を呼び出して、各サンプルの `vm_state` を `%GVL`/`%GC` ラベルに変換し、既存の `label_sets` にマージします。例えば、`vm_state=GVL_BLOCKED` は `%GVL: "blocked"` ラベルになります。これにより、VM 状態がユーザーラベル（`endpoint` など）と同じ仕組みで pprof のサンプルラベルに書き込まれます。
 
-Ruby エンコーダー（`Rperf::PProf`、`Rperf::Collapsed`、`Rperf::Text`）がこれらの配列を消費して最終出力を生成します。
+Ruby エンコーダーがこれらの配列を消費して最終出力を生成します。
+
+## JSON 形式（デフォルト）
+
+rperf のネイティブ出力形式は gzip 圧縮 JSON（`.json.gz`）です。`Rperf.save` や `rperf record` で保存する際のデフォルトです。JSON ファイルには内部データがすべて保持されます: フレームスタック付きの集約サンプル、重み、スレッド連番、ラベルセット ID、完全なラベルセット配列。プロファイリングメタデータ（モード、周波数、期間、サンプル数）も含まれます。
+
+JSON は rperf ビューア（`rperf report` でブラウザで直接開ける）や Ruby でのプログラム的な分析に推奨される形式です。pprof と異なり、外部ツールは不要です。
 
 ## pprof エンコーダー
 

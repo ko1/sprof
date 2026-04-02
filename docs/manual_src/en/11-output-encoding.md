@@ -12,7 +12,13 @@ When `Rperf.stop` is called, the C extension returns the aggregated data to Ruby
 
 Before passing the data to encoders, the Ruby layer calls `merge_vm_state_labels!` to convert each sample's `vm_state` into labels: `vm_state = GVL_BLOCKED` becomes `{"%GVL" => "blocked"}`, `GVL_WAIT` becomes `{"%GVL" => "wait"}`, `GC_MARK` becomes `{"%GC" => "mark"}`, and `GC_SWEEP` becomes `{"%GC" => "sweep"}`. These labels are merged into the sample's existing `label_set_id`, so they appear alongside user labels like `endpoint` in the output.
 
-The Ruby encoders (`Rperf::PProf`, `Rperf::Collapsed`, `Rperf::Text`) consume these arrays to produce the final output.
+The Ruby encoders consume these arrays to produce the final output.
+
+## JSON format (default)
+
+rperf's native output format is gzip-compressed JSON (`.json.gz`). This is the default when saving with `Rperf.save` or `rperf record`. The JSON file preserves all internal data: aggregated samples with frame stacks, weights, thread sequence numbers, label set IDs, and the full label sets array. It also includes profiling metadata (mode, frequency, duration, sample counts).
+
+JSON is the recommended format for use with the rperf viewer (`rperf report` opens it directly in the browser) and for programmatic analysis in Ruby. Unlike pprof, no external tools are needed.
 
 ## pprof encoder
 
