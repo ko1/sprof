@@ -5,7 +5,7 @@ Gem::Specification.new do |spec|
   spec.version       = Rperf::VERSION
   spec.authors       = ["Koichi Sasada"]
   spec.summary       = "Safepoint-based sampling performance profiler for Ruby"
-  spec.description   = "A safepoint-based sampling performance profiler that uses thread CPU time deltas as weights to correct safepoint bias. Outputs JSON, pprof, collapsed stacks, or text report."
+  spec.description   = "A safepoint-based sampling performance profiler that uses actual time deltas as weights to correct safepoint bias. Outputs JSON, pprof, collapsed stacks, or text report."
   spec.homepage      = "https://github.com/ko1/rperf"
   spec.license       = "MIT"
   spec.required_ruby_version = ">= 3.4.0"
@@ -15,8 +15,6 @@ Gem::Specification.new do |spec|
   spec.executables   = ["rperf"]
   spec.extensions    = ["ext/rperf/extconf.rb"]
   spec.require_paths = ["lib"]
-
-  spec.add_dependency "rackup"
 
   spec.add_development_dependency "rake-compiler", "~> 1.2"
   spec.add_development_dependency "test-unit", "~> 3.6"

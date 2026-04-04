@@ -87,7 +87,7 @@ module Rperf
   end
 
   # VM state integer → label value mapping.
-  # These values appear in the "Ruby" label key.
+  # These values appear as "%GVL" / "%GC" label keys in label_sets.
   VM_STATE_LABELS = {
     1 => ["%GVL", "blocked"],
     2 => ["%GVL", "wait"],
@@ -223,9 +223,6 @@ module Rperf
   # Label set management for per-context profiling.
   # Label sets are stored as an Array of Hashes, indexed by label_set_id.
   # Index 0 is reserved (no labels).
-
-  @label_set_table = nil  # Array of frozen Hash
-  @label_set_index = nil  # Hash → id (for dedup)
 
   def self._init_label_sets
     @label_set_table = [{}]  # id 0 = no labels

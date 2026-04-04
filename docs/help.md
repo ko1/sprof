@@ -181,7 +181,7 @@ Rperf.save("profile.txt", data)
 
 ### Rperf.start parameters
 
-    frequency:  Sampling frequency in Hz (Integer, default: 1000)
+    frequency:  Sampling frequency in Hz (Integer, 1..10000, default: 1000)
     mode:       :cpu or :wall (Symbol, default: :cpu)
     output:     File path to write on stop (String or nil)
     verbose:    Print statistics to stderr (true/false, default: false)
@@ -670,6 +670,7 @@ Used internally by the CLI to pass options to the auto-started profiler:
     RPERF_STAT=1          Enable stat mode (used by rperf stat)
     RPERF_STAT_REPORT=1   Include profile tables in stat output
     RPERF_AGGREGATE=0     Disable C-level sample aggregation (raw mode)
+    RPERF_DEFER=1         Start with timer paused; use Rperf.profile to activate
     RPERF_TMPDIR=path     Base directory for session directories (overrides default tmpdir)
 
 Internal variables (set automatically by the CLI — not for manual use):
