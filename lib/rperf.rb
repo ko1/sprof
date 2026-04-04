@@ -131,7 +131,13 @@ module Rperf
     print_stat(data) if @stat
 
     if @output
-      write_data(@output, data, @format)
+      begin
+        write_data(@output, data, @format)
+      rescue SystemCallError
+        # Parent may have already cleaned up the session dir (e.g., parent
+        # exited first and rm_rf'd it), or disk is full. Silently skip —
+        # crashing in at_exit is worse than losing one child's profile.
+      end
       @output = nil
       @format = nil
     end
