@@ -54,10 +54,8 @@ module Rperf
     @output = output
     @format = format
     @stat = stat
-    if @stat
-      @stat_start_mono = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      @stat_start_times = Process.times
-    end
+    @stat_start_mono = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    @stat_start_times = Process.times
     @label_set_table = nil
     @label_set_index = nil
     _c_start(frequency, c_mode, aggregate, c_signal, defer)
@@ -105,6 +103,12 @@ module Rperf
 
     data = _c_stop
     return unless data
+
+    # Record process times for multi-process aggregation
+    times = Process.times
+    start_times = @stat_start_times || Struct.new(:utime, :stime).new(0.0, 0.0)
+    data[:user_ns] = ((times.utime - start_times.utime) * 1_000_000_000).to_i
+    data[:sys_ns] = ((times.stime - start_times.stime) * 1_000_000_000).to_i
 
     # When aggregate: false, C extension returns :raw_samples but not
     # :aggregated_samples.  Build aggregated view so encoders always work.
@@ -478,6 +482,13 @@ module Rperf
     user_ns = ((times.utime - start_times.utime) * 1_000_000_000).to_i
     sys_ns = ((times.stime - start_times.stime) * 1_000_000_000).to_i
 
+    # In multi-process mode, use aggregated user/sys from all processes
+    process_count = data[:process_count] || 0
+    if process_count > 1 && data[:user_ns]
+      user_ns = data[:user_ns]
+      sys_ns = data[:sys_ns] || 0
+    end
+
     command = ENV["RPERF_STAT_COMMAND"] || "(unknown)"
 
     $stderr.puts
@@ -612,16 +623,15 @@ module Rperf
   def self.print_stat_footer(samples_raw, real_ns, data)
     triggers = data[:trigger_count] || 0
     sampling_time_ns = data[:sampling_time_ns] || 0
-    process_count = data[:process_count] || 1
-    # In multi-process mode, sampling_time_ns is the sum across all processes,
-    # but real_ns is only the root process's wall time. Divide by process_count
-    # to get the average per-process overhead.
-    overhead_pct = real_ns > 0 ? sampling_time_ns * 100.0 / (real_ns * [process_count, 1].max) : 0.0
+    # In multi-process mode, use sum of all processes' durations as denominator.
+    # Single-process: fall back to root's real_ns.
+    total_real_ns = data[:total_duration_ns] || real_ns
+    total_real_ns = real_ns if total_real_ns == 0
+    overhead_pct = total_real_ns > 0 ? sampling_time_ns * 100.0 / total_real_ns : 0.0
     $stderr.puts
     samples = data[:sampling_count] || samples_raw.size
-    overhead_label = process_count > 1 ? "avg per-process profiler overhead" : "profiler overhead"
-    $stderr.puts format("  %d samples / %d triggers, %.1f%% %s",
-                        samples, triggers, overhead_pct, overhead_label)
+    $stderr.puts format("  %d samples / %d triggers, %.1f%% profiler overhead",
+                        samples, triggers, overhead_pct)
     dropped = data[:dropped_samples] || 0
     if dropped > 0
       $stderr.puts format("  WARNING: %d samples dropped due to memory allocation failure", dropped)
@@ -878,6 +888,9 @@ module Rperf
     total_sampling_count = 0
     total_sampling_time_ns = 0
     max_duration_ns = 0
+    total_duration_ns = 0
+    total_user_ns = 0
+    total_sys_ns = 0
     process_count = 0
 
     Dir.glob(File.join(session_dir, "profile-*.json.gz")).each do |file|
@@ -889,6 +902,9 @@ module Rperf
       total_sampling_time_ns += (data[:sampling_time_ns] || 0)
       d = data[:duration_ns] || 0
       max_duration_ns = d if d > max_duration_ns
+      total_duration_ns += d
+      total_user_ns += (data[:user_ns] || 0)
+      total_sys_ns += (data[:sys_ns] || 0)
       process_count += 1
     end
 
@@ -903,6 +919,9 @@ module Rperf
       sampling_count: total_sampling_count,
       sampling_time_ns: total_sampling_time_ns,
       duration_ns: max_duration_ns,
+      total_duration_ns: total_duration_ns,
+      user_ns: total_user_ns,
+      sys_ns: total_sys_ns,
       process_count: process_count,
     }
 
