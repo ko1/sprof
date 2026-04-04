@@ -407,8 +407,28 @@ if inherit
       end
     end
 
-    ENV["RPERF_ROOT_PROCESS"] = Process.pid.to_s
-    ENV["RPERF_SESSION_DIR"] = File.join(user_dir, "rperf-#{Process.pid}-#{SecureRandom.hex(4)}")
+    # Create session directory eagerly.  If creation fails, fall back to
+    # single-process mode (don't set env vars → inherit disabled).
+    unless File.directory?(user_dir)
+      begin
+        Dir.mkdir(user_dir, 0700)
+      rescue Errno::EEXIST
+        # race — fine
+      rescue SystemCallError
+        user_dir = nil
+      end
+    end
+
+    if user_dir
+      session_dir = File.join(user_dir, "rperf-#{Process.pid}-#{SecureRandom.hex(4)}")
+      begin
+        Dir.mkdir(session_dir, 0700)
+        ENV["RPERF_ROOT_PROCESS"] = Process.pid.to_s
+        ENV["RPERF_SESSION_DIR"] = session_dir
+      rescue SystemCallError
+        # Session dir creation failed — continue without inherit
+      end
+    end
   end
 end
 

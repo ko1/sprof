@@ -87,14 +87,18 @@ module Rperf
   }.freeze
 
   def self.stop
-    # Check if we need to aggregate child process data (API inherit mode)
+    # Check if we need to aggregate child process data.
+    # @_session_dir_created: fork happened and root's output was switched.
+    # Otherwise: check for actual child profile files (spawn-only case).
     session_dir = ENV["RPERF_SESSION_DIR"]
-    needs_aggregation = session_dir &&
-                        Process.pid.to_s == ENV["RPERF_ROOT_PROCESS"] &&
-                        (@_session_dir_created || File.directory?(session_dir.to_s))
+    is_root = session_dir && Process.pid.to_s == ENV["RPERF_ROOT_PROCESS"]
+    has_child_profiles = is_root && !@_session_dir_created &&
+                         File.directory?(session_dir.to_s) &&
+                         !Dir.glob(File.join(session_dir.to_s, "profile-*.json.gz")).empty?
+    needs_aggregation = is_root && (@_session_dir_created || has_child_profiles)
 
-    if needs_aggregation && !@_session_dir_created
-      # spawn case: suppress individual output, aggregation will handle it
+    if has_child_profiles
+      # spawn-only case: suppress individual output, aggregation will handle it
       @stat = false
       @output = nil
     end
@@ -130,8 +134,8 @@ module Rperf
 
     # Aggregate child process data if needed
     if needs_aggregation
-      if data && !@_session_dir_created && File.directory?(session_dir)
-        # spawn case: root's data wasn't written to session dir, write it now
+      if data && has_child_profiles
+        # spawn-only case: root's data wasn't written to session dir, write it now
         save(File.join(session_dir, "profile-#{Process.pid}.json.gz"), data, format: :json)
       end
       merged = _aggregate_and_report
@@ -144,10 +148,18 @@ module Rperf
   end
 
   def self._cleanup_session_state
-    ENV.delete("RPERF_SESSION_DIR")
+    session_dir = ENV.delete("RPERF_SESSION_DIR")
     ENV.delete("RPERF_ROOT_PROCESS")
     ENV.delete("RPERF_DEFER")
     @_session_dir_created = false
+    # Remove eagerly-created session dir if it's empty (no children ran)
+    if session_dir && File.directory?(session_dir)
+      begin
+        Dir.rmdir(session_dir)  # only succeeds if empty
+      rescue SystemCallError
+        # not empty or already removed — fine
+      end
+    end
   end
   private_class_method :_cleanup_session_state
 
@@ -607,8 +619,9 @@ module Rperf
     overhead_pct = real_ns > 0 ? sampling_time_ns * 100.0 / (real_ns * [process_count, 1].max) : 0.0
     $stderr.puts
     samples = data[:sampling_count] || samples_raw.size
-    $stderr.puts format("  %d samples / %d triggers, %.1f%% profiler overhead",
-                        samples, triggers, overhead_pct)
+    overhead_label = process_count > 1 ? "avg per-process profiler overhead" : "profiler overhead"
+    $stderr.puts format("  %d samples / %d triggers, %.1f%% %s",
+                        samples, triggers, overhead_pct, overhead_label)
     dropped = data[:dropped_samples] || 0
     if dropped > 0
       $stderr.puts format("  WARNING: %d samples dropped due to memory allocation failure", dropped)
@@ -688,27 +701,12 @@ module Rperf
 
   # Set up child process tracking from Rperf.start(inherit: ...).
   # Called only when NOT already inside a CLI-managed session (no RPERF_SESSION_DIR).
+  # Creates the session directory eagerly — if creation fails, inherit is silently
+  # disabled and profiling continues in single-process mode.
   def self._setup_inherit(mode, frequency, signal, aggregate, output, format, stat, inherit, defer)
-    require "securerandom"
-    require "tmpdir"
+    session_dir = _create_session_dir
+    return unless session_dir
 
-    bases = [ENV["RPERF_TMPDIR"], ENV["XDG_RUNTIME_DIR"], Dir.tmpdir].compact
-    user_dir = nil
-    bases.each do |base|
-      candidate = File.join(base, "rperf-#{Process.uid}")
-      if File.directory?(candidate)
-        st = File.stat(candidate)
-        next unless st.owned? && (st.mode & 0777) == 0700
-        user_dir = candidate
-        break
-      elsif File.writable?(base)
-        user_dir = candidate
-        break
-      end
-    end
-    return unless user_dir
-
-    session_dir = File.join(user_dir, "rperf-#{Process.pid}-#{SecureRandom.hex(4)}")
     ENV["RPERF_ROOT_PROCESS"] = Process.pid.to_s
     ENV["RPERF_SESSION_DIR"] = session_dir
     ENV["RPERF_DEFER"] = "1" if defer
@@ -733,6 +731,51 @@ module Rperf
     end
   end
   private_class_method :_setup_inherit
+
+  # Create session directory eagerly.  Returns the session dir path on success,
+  # nil on failure (caller should fall back to single-process mode).
+  def self._create_session_dir
+    require "securerandom"
+    require "tmpdir"
+
+    bases = [ENV["RPERF_TMPDIR"], ENV["XDG_RUNTIME_DIR"], Dir.tmpdir].compact
+    user_dir = nil
+    bases.each do |base|
+      candidate = File.join(base, "rperf-#{Process.uid}")
+      if File.directory?(candidate)
+        st = File.stat(candidate)
+        next unless st.owned? && (st.mode & 0777) == 0700
+        user_dir = candidate
+        break
+      elsif File.writable?(base)
+        user_dir = candidate
+        break
+      end
+    end
+    return unless user_dir
+
+    # Create user dir if needed
+    unless File.directory?(user_dir)
+      begin
+        Dir.mkdir(user_dir, 0700)
+      rescue Errno::EEXIST
+        st = File.stat(user_dir)
+        return unless st.owned? && (st.mode & 0777) == 0700
+      rescue SystemCallError
+        return
+      end
+    end
+
+    # Create session dir
+    session_dir = File.join(user_dir, "rperf-#{Process.pid}-#{SecureRandom.hex(4)}")
+    begin
+      Dir.mkdir(session_dir, 0700)
+    rescue SystemCallError
+      return
+    end
+    session_dir
+  end
+  private_class_method :_create_session_dir
 
   def self._parse_signal_env
     case ENV["RPERF_SIGNAL"]
@@ -770,37 +813,8 @@ module Rperf
   def self._on_first_fork
     return if @_session_dir_created
     session_dir = ENV["RPERF_SESSION_DIR"]
-    return unless session_dir
+    return unless session_dir && File.directory?(session_dir)
 
-    # Create session dir on first fork
-    require "fileutils"
-    user_dir = File.dirname(session_dir)
-    if File.directory?(user_dir)
-      st = File.stat(user_dir)
-      unless st.owned? && (st.mode & 0777) == 0700
-        warn "rperf: error: #{user_dir} exists but is not owned by you or has insecure permissions " \
-             "(owner=#{st.uid} mode=#{'%04o' % (st.mode & 0777)}, expected owner=#{Process.uid} mode=0700)"
-        return
-      end
-    else
-      begin
-        Dir.mkdir(user_dir, 0700)
-      rescue Errno::EEXIST
-        # race — fine, re-check ownership
-        st = File.stat(user_dir)
-        unless st.owned? && (st.mode & 0777) == 0700
-          warn "rperf: error: #{user_dir} has insecure permissions"
-          return
-        end
-      rescue SystemCallError
-        return
-      end
-    end
-    begin
-      Dir.mkdir(session_dir, 0700)
-    rescue SystemCallError
-      return
-    end
     @_session_dir_created = true
 
     # Switch root's output to session dir (stat timing is already saved by start())
@@ -811,7 +825,7 @@ module Rperf
 
   def self._restart_in_child
     session_dir = ENV["RPERF_SESSION_DIR"]
-    return unless session_dir
+    return unless session_dir && File.directory?(session_dir)
     return if _c_running?  # should not happen, but guard against it
 
     # C state is already cleaned up by pthread_atfork child handler.
@@ -974,41 +988,11 @@ module Rperf
 
     if ENV["RPERF_SESSION_DIR"] && Process.pid.to_s != ENV["RPERF_ROOT_PROCESS"]
       # spawn / fork+exec child: write to session dir, no aggregation.
+      # Session dir is created eagerly by the root process (CLI or API).
+      # If it doesn't exist, skip profiling entirely — don't fall back to
+      # normal mode which would duplicate output with the root process.
       _rperf_session_dir = ENV["RPERF_SESSION_DIR"]
-      unless File.directory?(_rperf_session_dir)
-        require "fileutils"
-        # Create session dir and its parent with proper permissions
-        _rperf_user_dir = File.dirname(_rperf_session_dir)
-        unless File.directory?(_rperf_user_dir)
-          begin
-            Dir.mkdir(_rperf_user_dir, 0700)
-          rescue Errno::EEXIST
-            # race — fine
-          rescue SystemCallError
-            # graceful degradation
-          end
-        end
-        if File.directory?(_rperf_user_dir)
-          st = File.stat(_rperf_user_dir)
-          unless st.owned? && (st.mode & 0777) == 0700
-            warn "rperf: error: #{_rperf_user_dir} has insecure permissions"
-            # Fall through to else branch (no session dir)
-            _rperf_session_dir = nil
-          end
-        end
-        if _rperf_session_dir
-          begin
-            Dir.mkdir(_rperf_session_dir, 0700)
-          rescue Errno::EEXIST
-            # another child already created it — fine
-          rescue SystemCallError
-            # graceful degradation
-            _rperf_session_dir = nil
-          end
-        end
-      end
-
-      if _rperf_session_dir && File.directory?(_rperf_session_dir)
+      if File.directory?(_rperf_session_dir)
         _rperf_start_opts[:output] = File.join(_rperf_session_dir, "profile-#{Process.pid}.json.gz")
         _rperf_start_opts[:format] = :json
         _rperf_start_opts[:stat] = false
@@ -1017,13 +1001,6 @@ module Rperf
         _install_fork_hook
         start(**_rperf_start_opts, inherit: false)
         label("%pid": Process.pid.to_s)
-        at_exit { stop }
-      else
-        # Security check failed or dir creation failed — fall through to normal mode
-        _rperf_start_opts[:output] = _rperf_original_output
-        _rperf_start_opts[:format] = _rperf_format
-        _rperf_start_opts[:stat] = _rperf_stat
-        start(**_rperf_start_opts, inherit: false)
         at_exit { stop }
       end
     elsif ENV["RPERF_SESSION_DIR"]
