@@ -70,13 +70,15 @@ def run_pprof_subcommand(name, banner, min_files:)
   yield mode, files
 end
 
-HELP_TEXT = File.read(File.expand_path("../docs/help.md", __dir__))
+def self.help_text
+  @help_text ||= File.read(File.expand_path("../docs/help.md", __dir__))
+end
 
 USAGE = "Usage: rperf record [options] command [args...]\n" \
        "       rperf stat [options] command [args...]\n" \
        "       rperf exec [options] command [args...]\n" \
        "       rperf report [options] [file]\n" \
-       "       rperf diff [options] base.pb.gz target.pb.gz\n" \
+       "       rperf diff [options] base target\n" \
        "       rperf help\n"
 
 # Handle top-level flags before subcommand parsing
@@ -96,7 +98,7 @@ subcommand = ARGV.shift
 
 case subcommand
 when "help"
-  puts HELP_TEXT
+  puts help_text
   exit
 when "report"
   run_pprof_subcommand("report",

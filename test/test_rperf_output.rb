@@ -284,6 +284,40 @@ class TestRperfOutput < Test::Unit::TestCase
     end
   end
 
+  # --- Load error paths ---
+
+  def test_load_nonexistent_file
+    assert_raise(Errno::ENOENT) do
+      Rperf.load("/nonexistent/path/to/profile.json.gz")
+    end
+  end
+
+  def test_load_invalid_gzip
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "bad.json.gz")
+      File.binwrite(path, "this is not gzip data")
+      assert_raise(Zlib::GzipFile::Error) do
+        Rperf.load(path)
+      end
+    end
+  end
+
+  def test_load_invalid_json
+    require "json"
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "bad.json.gz")
+      io = StringIO.new
+      io.set_encoding("ASCII-8BIT")
+      gz = Zlib::GzipWriter.new(io)
+      gz.write("not valid json {{{")
+      gz.close
+      File.binwrite(path, io.string)
+      assert_raise(JSON::ParserError) do
+        Rperf.load(path)
+      end
+    end
+  end
+
   # --- Format override ---
 
   def test_format_override

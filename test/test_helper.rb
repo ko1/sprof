@@ -10,6 +10,8 @@ module RperfTestHelper
     ENV.delete("RPERF_SESSION_DIR")
     ENV.delete("RPERF_ROOT_PROCESS")
     ENV.delete("RPERF_ENABLED")
+    ENV.delete("RPERF_STAT_COMMAND")
+    ENV.delete("RPERF_STAT_REPORT")
     Rperf.instance_variable_set(:@_session_dir_created, false)
     Rperf.instance_variable_set(:@_aggregate_output, nil)
     Rperf.instance_variable_set(:@_aggregate_stat, false)

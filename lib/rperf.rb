@@ -189,6 +189,22 @@ module Rperf
     end
   end
 
+  # Merges the given keyword labels into the current thread's label set,
+  # sets the result on the current thread, and returns [previous_id, new_id].
+  # Callers use previous_id to restore labels after a block.
+  def self._merge_and_set_label(kw)
+    _init_label_sets unless @label_set_table
+
+    cur_id = _c_get_label
+    cur_labels = @label_set_table[cur_id] || {}
+    new_labels = cur_labels.merge(kw).reject { |_, v| v.nil? }
+    new_id = _intern_label_set(new_labels)
+    _c_set_label(new_id)
+
+    [cur_id, new_id]
+  end
+  private_class_method :_merge_and_set_label
+
   # Sets labels on the current thread for profiling annotation.
   # With a block: restores previous labels when the block exits.
   # Without a block: sets labels persistently on the current thread.
@@ -202,14 +218,7 @@ module Rperf
     return yield if block && !_c_running?
     return unless _c_running?
 
-    _init_label_sets unless @label_set_table
-
-    cur_id = _c_get_label
-    cur_labels = @label_set_table[cur_id] || {}
-
-    new_labels = cur_labels.merge(kw).reject { |_, v| v.nil? }
-    new_id = _intern_label_set(new_labels)
-    _c_set_label(new_id)
+    cur_id, _new_id = _merge_and_set_label(kw)
 
     if block
       begin
@@ -234,13 +243,7 @@ module Rperf
     raise ArgumentError, "Rperf.profile requires a block" unless block
     raise RuntimeError, "Rperf is not started" unless _c_running?
 
-    _init_label_sets unless @label_set_table
-
-    cur_id = _c_get_label
-    cur_labels = @label_set_table[cur_id] || {}
-    new_labels = cur_labels.merge(kw).reject { |_, v| v.nil? }
-    new_id = _intern_label_set(new_labels)
-    _c_set_label(new_id)
+    cur_id, _new_id = _merge_and_set_label(kw)
 
     _c_profile_inc
 
@@ -826,18 +829,22 @@ module Rperf
 
     merged_samples = []
     merged_label_sets = [{}]
+    merged_label_sets_index = { {} => 0 }
     total_trigger_count = 0
     total_sampling_count = 0
     total_sampling_time_ns = 0
+    max_duration_ns = 0
     process_count = 0
 
     Dir.glob(File.join(session_dir, "profile-*.json.gz")).each do |file|
       data = load(file)
       next unless data
-      _merge_into(merged_samples, merged_label_sets, data)
+      _merge_into(merged_samples, merged_label_sets, data, merged_label_sets_index)
       total_trigger_count += (data[:trigger_count] || 0)
       total_sampling_count += (data[:sampling_count] || 0)
       total_sampling_time_ns += (data[:sampling_time_ns] || 0)
+      d = data[:duration_ns] || 0
+      max_duration_ns = d if d > max_duration_ns
       process_count += 1
     end
 
@@ -851,6 +858,7 @@ module Rperf
       trigger_count: total_trigger_count,
       sampling_count: total_sampling_count,
       sampling_time_ns: total_sampling_time_ns,
+      duration_ns: max_duration_ns,
       process_count: process_count,
     }
 
@@ -888,23 +896,31 @@ module Rperf
     return if files.empty?
     require "fileutils"
     FileUtils.cp(files.first, @_aggregate_output)
-  rescue
+  rescue StandardError
     # nothing more we can do
   end
   private_class_method :_fallback_aggregate_output
 
-  def self._merge_into(merged_samples, merged_label_sets, data)
+  def self._merge_into(merged_samples, merged_label_sets, data, merged_label_sets_index = nil)
+    # Build a reverse index on first call for O(1) dedup lookups
+    unless merged_label_sets_index
+      merged_label_sets_index = {}
+      merged_label_sets.each_with_index { |ls, i| merged_label_sets_index[ls] = i }
+    end
+
     child_label_sets = data[:label_sets] || [{}]
     id_map = {}
     child_label_sets.each_with_index do |ls, child_id|
       # Normalize keys to symbols for consistent comparison
       normalized = ls.is_a?(Hash) ? ls.transform_keys(&:to_sym) : ls
-      existing = merged_label_sets.index(normalized)
+      existing = merged_label_sets_index[normalized]
       if existing
         id_map[child_id] = existing
       else
-        id_map[child_id] = merged_label_sets.size
+        new_idx = merged_label_sets.size
+        id_map[child_id] = new_idx
         merged_label_sets << normalized
+        merged_label_sets_index[normalized] = new_idx
       end
     end
 

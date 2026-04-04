@@ -87,11 +87,30 @@ class Rperf::Viewer
     end
   end
 
+  # Convert aggregated samples to JSON-friendly format.
+  # Stack is stored top-to-bottom (leaf first) in C; reverse to root-first for flamegraph.
+  # Label set keys are converted from symbols to strings for JSON.
+  def self.samples_to_json(samples, label_sets)
+    json_samples = samples.map do |frames, weight, thread_seq, label_set_id|
+      {
+        stack: frames.reverse.map { |_, label| label },
+        weight: weight,
+        thread_seq: thread_seq || 0,
+        label_set_id: label_set_id || 0,
+      }
+    end
+    json_label_sets = label_sets.map do |ls|
+      ls.is_a?(Hash) ? ls.transform_keys(&:to_s) : ls
+    end
+    [json_samples, json_label_sets]
+  end
+
   # Generate a self-contained static HTML file with inline snapshot data.
   # The HTML loads d3/d3-flamegraph from CDN but requires no server.
   def self.render_static_html(data)
     samples = data[:aggregated_samples] || []
     label_sets = data[:label_sets] || []
+    json_samples, json_label_sets = samples_to_json(samples, label_sets)
 
     json_snapshot = JSON.generate({
       id: 1,
@@ -100,15 +119,8 @@ class Rperf::Viewer
       frequency: data[:frequency],
       duration_ns: data[:duration_ns],
       sampling_count: data[:sampling_count],
-      samples: samples.map { |frames, weight, thread_seq, label_set_id|
-        {
-          stack: frames.reverse.map { |_, label| label },
-          weight: weight,
-          thread_seq: thread_seq || 0,
-          label_set_id: label_set_id || 0,
-        }
-      },
-      label_sets: label_sets.map { |ls| ls.is_a?(Hash) ? ls.transform_keys(&:to_s) : ls },
+      samples: json_samples,
+      label_sets: json_label_sets,
     })
 
     logo = LOGO_SVG.sub("<svg ", '<svg style="height:36px;width:auto" ')
@@ -170,24 +182,9 @@ class Rperf::Viewer
     return [404, { "content-type" => "text/plain" }, ["Snapshot not found"]] unless entry
 
     data = entry[:data]
-    samples = data[:aggregated_samples]
+    samples = data[:aggregated_samples] || []
     label_sets = data[:label_sets] || []
-
-    # Convert samples to JSON-friendly format.
-    # Stack is stored top-to-bottom (leaf first) in C; reverse to root-first for flamegraph.
-    json_samples = samples.map do |frames, weight, thread_seq, label_set_id|
-      {
-        stack: frames.reverse.map { |_, label| label },
-        weight: weight,
-        thread_seq: thread_seq || 0,
-        label_set_id: label_set_id || 0,
-      }
-    end
-
-    # Convert label_sets: symbol keys to string keys for JSON
-    json_label_sets = label_sets.map do |ls|
-      ls.is_a?(Hash) ? ls.transform_keys(&:to_s) : ls
-    end
+    json_samples, json_label_sets = self.class.samples_to_json(samples, label_sets)
 
     json_response({
       id: entry[:id],
@@ -213,6 +210,7 @@ class Rperf::Viewer
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self'; img-src data:; frame-ancestors 'none'">
 <title>rperf Viewer</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/d3-flame-graph@4/dist/d3-flamegraph.css" integrity="sha384-DgAQSBzzhv8bu6Qc6Lq08THluOr+kO5qLMHt1yv8A3my7Jz2OQv6aq/WSZRYIQkG" crossorigin="anonymous">
 <style>

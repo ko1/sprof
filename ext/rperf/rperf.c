@@ -85,7 +85,7 @@ typedef struct rperf_sample_buffer {
 
 typedef struct rperf_frame_table {
     _Atomic(VALUE *) keys;    /* unique VALUE array (GC mark target) */
-    size_t count;             /* = next frame_id */
+    _Atomic(size_t) count;    /* = next frame_id */
     size_t capacity;
     uint32_t *buckets;        /* open addressing: stores index into keys[] */
     size_t bucket_capacity;
@@ -220,7 +220,7 @@ rperf_profiler_mark(void *ptr)
      * If we see an old count, both old and new keys arrays have valid
      * data (old keys are kept alive in old_keys[]). */
     {
-        size_t ft_count = __atomic_load_n(&prof->frame_table.count, __ATOMIC_ACQUIRE);
+        size_t ft_count = atomic_load_explicit(&prof->frame_table.count, memory_order_acquire);
         VALUE *ft_keys = atomic_load_explicit(&prof->frame_table.keys, memory_order_acquire);
         if (ft_keys && ft_count > 0) {
             rb_gc_mark_locations(ft_keys, ft_keys + ft_count);
@@ -441,7 +441,7 @@ rperf_frame_table_insert(rperf_frame_table_t *ft, VALUE fval)
     keys[frame_id] = fval;
     /* Store fence: ensure keys[frame_id] is visible before count is incremented,
      * so GC dmark never reads uninitialized keys[count-1]. */
-    __atomic_store_n(&ft->count, ft->count + 1, __ATOMIC_RELEASE);
+    atomic_store_explicit(&ft->count, ft->count + 1, memory_order_release);
     ft->buckets[idx] = frame_id;
 
     /* Rehash if load factor > 0.7 */
@@ -628,7 +628,7 @@ rperf_aggregate_buffer(rperf_profiler_t *prof, rperf_sample_buffer_t *buf)
      * Release fence: ensure all frame_table inserts are visible (to GC dmark)
      * before frame_pool_count is cleared, so dmark always has at least one
      * source (frame_table or frame_pool) covering each VALUE. */
-    __atomic_thread_fence(__ATOMIC_RELEASE);
+    atomic_thread_fence(memory_order_release);
     buf->sample_count = 0;
     buf->frame_pool_count = 0;
 }
@@ -705,7 +705,9 @@ rperf_thread_data_create(rperf_profiler_t *prof, VALUE thread)
 {
     rperf_thread_data_t *td = (rperf_thread_data_t *)calloc(1, sizeof(rperf_thread_data_t));
     if (!td) return NULL;
-    td->prev_time_ns = rperf_current_time_ns(prof);
+    int64_t t = rperf_current_time_ns(prof);
+    if (t < 0) { free(td); return NULL; }
+    td->prev_time_ns = t;
     td->prev_wall_ns = rperf_wall_time_ns();
     td->thread_seq = ++prof->next_thread_seq;
     rb_internal_thread_specific_set(thread, prof->ts_key, td);

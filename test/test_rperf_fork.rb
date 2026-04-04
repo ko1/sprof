@@ -37,7 +37,7 @@ class TestRperfFork < Test::Unit::TestCase
   def test_repeated_start_stop_then_fork_no_signal_death
     # Regression test: repeated start/stop cycles could leave a pending RT
     # signal that kills the process after fork (exit code 128+42).
-    10.times do
+    10.times do |i|
       3.times do
         Rperf.start(frequency: 1000, inherit: false)
         200_000.times { 1 + 1 }
@@ -61,7 +61,7 @@ class TestRperfFork < Test::Unit::TestCase
       rd.close
       _, status = Process.waitpid2(pid)
 
-      assert status.success?, "Child killed by signal #{status.termsig} on iteration"
+      assert status.success?, "Child killed by signal #{status.termsig} on iteration #{i}"
       assert_equal "nil", lines[0]
       assert_equal "has_data", lines[1]
     end

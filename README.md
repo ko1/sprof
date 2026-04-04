@@ -176,12 +176,12 @@ Use `cpu` to find what consumes CPU. Use `wall` to find what makes things slow (
 
 rperf hooks GVL and GC events to attribute non-CPU time. These are recorded as labels on samples rather than synthetic stack frames:
 
-| Label | Mode | Meaning |
+| Label (key=value) | Mode | Meaning |
 |-------|------|---------|
-| `%GVL: blocked` | wall only | Off-GVL time (I/O, sleep, C extension releasing GVL) |
-| `%GVL: wait` | wall only | Waiting to reacquire the GVL (contention) |
-| `%GC: mark` | cpu and wall | Time in GC mark phase (wall time) |
-| `%GC: sweep` | cpu and wall | Time in GC sweep phase (wall time) |
+| `%GVL=blocked` | wall only | Off-GVL time (I/O, sleep, C extension releasing GVL) |
+| `%GVL=wait` | wall only | Waiting to reacquire the GVL (contention) |
+| `%GC=mark` | cpu and wall | Time in GC mark phase (wall time) |
+| `%GC=sweep` | cpu and wall | Time in GC sweep phase (wall time) |
 
 ## Why rperf?
 

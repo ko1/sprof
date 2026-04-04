@@ -33,7 +33,7 @@ rperf record [options] command [args...]   # Profile and save to file
 rperf stat [options] command [args...]     # Profile and print summary to stderr
 rperf exec [options] command [args...]     # Profile and print full report to stderr (stat --report)
 rperf report [options] [file]              # Open profile in viewer or pprof (Go required for .pb.gz)
-rperf diff [options] base.pb.gz target.pb.gz  # Compare two profiles (requires Go)
+rperf diff [options] base target              # Compare two profiles (requires Go)
 rperf help                                 # Full reference documentation (AI-friendly)
 ```
 
@@ -54,8 +54,8 @@ See `benchmark/README.md` for full documentation.
 
 - **Weight = time delta, not sample count**: Each sample's weight is `clock_now - clock_prev` in nanoseconds. This corrects for safepoint delays.
 - **Current-thread-only sampling**: Timer-triggered postponed job samples only `rb_thread_current()` (the GVL holder). Combined with GVL event hooks, this gives complete thread coverage without iterating `Thread.list`.
-- **GVL event tracking** (wall mode): Hooks SUSPENDED/READY/RESUMED thread events. SUSPENDED captures backtrace + normal sample. RESUMED records off-GVL time and GVL contention time as samples with `vm_state` (converted to `%GVL: blocked` / `%GVL: wait` labels at encode time), reusing the saved stack.
-- **GC phase tracking**: Hooks GC_ENTER/GC_EXIT events. Records GC mark/sweep samples with `vm_state` (converted to `%GC: mark` / `%GC: sweep` labels at encode time), with wall time weight, attributed to the stack that triggered GC.
+- **GVL event tracking** (wall mode): Hooks SUSPENDED/READY/RESUMED thread events. SUSPENDED captures backtrace + normal sample. RESUMED records off-GVL time and GVL contention time as samples with `vm_state` (converted to `%GVL=blocked` / `%GVL=wait` labels at encode time), reusing the saved stack.
+- **GC phase tracking**: Hooks GC_ENTER/GC_EXIT events. Records GC mark/sweep samples with `vm_state` (converted to `%GC=mark` / `%GC=sweep` labels at encode time), with wall time weight, attributed to the stack that triggered GC.
 - **Deferred string resolution**: Sampling stores raw frame VALUEs in a pool (no synthetic frame VALUEs — GVL/GC state is tracked via `vm_state` enum, not frames). String resolution (`rb_profile_frame_full_label`, `rb_profile_frame_path`) happens at stop time, not during sampling. This keeps the hot path allocation-free.
 - **No protobuf dependency**: pprof format is encoded with a hand-written encoder in `lib/rperf.rb` (`Rperf::PProf.encode`). String table is built in Ruby at encode time.
 - **Multiple output formats**: JSON (rperf native, gzip JSON — default), pprof (gzip protobuf), collapsed stacks (FlameGraph/speedscope), text (human/AI-readable report). Format auto-detected from file extension. JSON preserves all internal data; `rperf report` opens it in the viewer without Go.
@@ -69,6 +69,14 @@ See `benchmark/README.md` for full documentation.
 
 - **Viewer (Rack middleware)**: `Rperf::Viewer` is a Rack middleware that serves an in-browser profiling UI at `/rperf/` (configurable via `path:` option). Snapshots are stored in memory (up to `max_snapshots:`, default 24). The UI has three tabs: **Flamegraph** (d3-flame-graph), **Top** (flat/cumulative table, sortable by column click), **Tags** (label key/value breakdown with weight bars, click to filter). Filtering: **tagfocus** (regex on label values, Enter to apply), **tagignore** (dropdown checkboxes, includes `key = (none)` to exclude untagged samples), **tagroot/tagleaf** (dropdown checkboxes for label keys, prepend/append to stack). Logo SVG is loaded from `docs/logo.svg` at require time and inlined into the HTML. Tag keys are sorted (so `%`-prefixed VM state keys appear first).
 - **RackMiddleware**: `Rperf::RackMiddleware` wraps requests with `Rperf.profile(endpoint: "GET /path")`, adding per-request labels and activating profiling for the duration of the request (works with `defer: true`).
+
+## Thread Safety Notes
+
+- `running` is `_Atomic int` — plain access in C11 is automatically seq_cst atomic. No need for explicit `atomic_load`/`atomic_store`.
+- `profile_refcount` is plain `int`. All writes are under GVL. The only non-GVL read is in the nanosleep worker (holds `worker_mutex`). Arm/disarm go through `pthread_mutex_lock` + `pthread_cond_signal`, establishing happens-before. Worst case on ARM: one extra sample before mutex sync forces visibility. Harmless for a profiler.
+- `worker_paused` is plain `int`, but all reads and writes are protected by `worker_mutex`. Fully synchronized.
+- `stats` fields: `sampling_count`, `sampling_total_ns`, `dropped_samples` are all accessed under GVL. `trigger_count` is written by signal handler on the worker thread only, read after `pthread_join`. `dropped_aggregation` has a benign race in `snapshot` (approximate stat).
+- Ractor is out of scope (profiler does not support Ractor).
 
 ## Coding Notes
 

@@ -12,7 +12,9 @@ POSIX systems (Linux, macOS). Requires Ruby >= 3.4.0.
     rperf stat [options] command [args...]
     rperf exec [options] command [args...]
     rperf report [options] [file]
+    rperf diff [options] base target
     rperf help
+    rperf -v / --version
 
 ### record: Profile and save to file.
 
@@ -85,7 +87,9 @@ sites (e.g., GitHub Pages).
 
     rperf report --html profile.json.gz > report.html
 
-### diff: Compare two pprof profiles (target - base). Requires Go.
+### diff: Compare two profiles (target - base). Requires Go.
+
+Accepts `.json.gz` (auto-converted to pprof) or `.pb.gz` files.
 
     --top                   Print top functions by diff
     --text                  Print text diff report
@@ -317,6 +321,17 @@ running). Raises `RuntimeError` if not started, `ArgumentError` without block.
 ### Rperf.labels
 
 Returns the current thread's labels as a Hash. Empty hash if none set.
+
+### Rperf.load(path)
+
+Loads a `.json.gz` profile file (saved by `rperf record` or `Rperf.save`)
+and returns the parsed data hash (same format as `Rperf.stop` / `Rperf.snapshot`).
+Warns to stderr if the file was saved by a different rperf version.
+
+```ruby
+data = Rperf.load("rperf.json.gz")
+# data is a Hash with :mode, :frequency, :aggregated_samples, etc.
+```
 
 ### Rperf.save(path, data, format: nil)
 
@@ -649,6 +664,14 @@ Used internally by the CLI to pass options to the auto-started profiler:
     RPERF_SIGNAL=N|false  Timer signal number or 'false' for nanosleep (Linux only)
     RPERF_STAT=1          Enable stat mode (used by rperf stat)
     RPERF_STAT_REPORT=1   Include profile tables in stat output
+    RPERF_AGGREGATE=0     Disable C-level sample aggregation (raw mode)
+    RPERF_TMPDIR=path     Base directory for session directories (overrides default tmpdir)
+
+Internal variables (set automatically by the CLI — not for manual use):
+
+    RPERF_SESSION_DIR=path   Session directory for multi-process profiling
+    RPERF_ROOT_PROCESS=pid   Marks the root aggregating process
+    RPERF_STAT_COMMAND=str   Command string displayed in stat output
 
 ## TIPS
 
