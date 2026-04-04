@@ -13,11 +13,24 @@ end
 
 module Rperf
 
-  @verbose = false
-  @output = nil
-  @stat = false
-  @stat_start_mono = nil
-  @_session_dir_output = false  # true when @output points to a session dir (child/fork)
+  # --- Module-level state (single global profiler) ---
+  # Profiling session
+  @verbose = false               # verbose stats output on stop
+  @output = nil                  # output file path (nil = no file)
+  @format = nil                  # output format (:json, :pprof, :collapsed, :text, nil = auto)
+  @stat = false                  # print user/sys/real summary to stderr
+  @stat_start_mono = nil         # Process::CLOCK_MONOTONIC at start (for real time)
+  @stat_start_times = nil        # Process.times at start (for user/sys time)
+  @label_set_table = nil         # Array: label_set_id → frozen Hash
+  @label_set_index = nil         # Hash: frozen label Hash → label_set_id
+  # Multi-process (fork/spawn) support
+  @_session_dir_output = false   # true when @output points to session dir (child/fork)
+  @_session_dir_created = false  # true after first fork activates session dir
+  @_fork_hook_installed = false  # true after Process._fork hook is prepended
+  @_aggregate_output = nil       # saved output path for root aggregation
+  @_aggregate_format = nil       # saved format for root aggregation
+  @_aggregate_stat = false       # saved stat flag for root aggregation
+  @_saved_env = nil              # saved ENV values for restore on stop (inherit: true)
 
   # Starts profiling.
   # format: :json, :pprof, :collapsed, or :text. nil = auto-detect from output extension
@@ -94,7 +107,7 @@ module Rperf
     has_child_profiles = is_root && !@_session_dir_created &&
                          File.directory?(session_dir.to_s) &&
                          !Dir.glob(File.join(session_dir.to_s, "profile-*.json.gz")).empty?
-    needs_aggregation = is_root && (@_session_dir_created || has_child_profiles)
+
 
     if has_child_profiles
       # spawn-only case: suppress individual output, aggregation will handle it
@@ -148,7 +161,7 @@ module Rperf
     end
 
     # Aggregate child process data if needed
-    if needs_aggregation
+    if is_root && (@_session_dir_created || has_child_profiles)
       if data && has_child_profiles
         # spawn-only case: root's data wasn't written to session dir, write it now
         save(File.join(session_dir, "profile-#{Process.pid}.json.gz"), data, format: :json)
@@ -753,11 +766,6 @@ module Rperf
 
   # --- Multi-process (fork) support ---
 
-  @_aggregate_output = nil
-  @_aggregate_stat = false
-  @_aggregate_format = nil
-  @_saved_env = nil  # saved ENV values for restore on stop (inherit: true)
-
   # Set up child process tracking from Rperf.start(inherit: ...).
   # Called only when NOT already inside a CLI-managed session (no RPERF_SESSION_DIR).
   # Creates the session directory eagerly — if creation fails, inherit is silently
@@ -860,10 +868,6 @@ module Rperf
     end
   end
   private_class_method :_parse_signal_env
-
-  @_fork_hook_installed = false
-
-  @_session_dir_created = false
 
   def self._install_fork_hook
     return if @_fork_hook_installed
