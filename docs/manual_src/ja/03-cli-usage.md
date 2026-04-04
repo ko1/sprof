@@ -226,13 +226,9 @@ Samples: 80, Frequency: 1000Hz
            253.8 ms  81.4%  Kernel#sleep (<C method>)
            253.8 ms  81.4%  Object#io_work (mixed.rb)
             58.0 ms  18.6%  Object#cpu_work (mixed.rb)
-
- Labels:
-           250.6 ms  80.4%  %GVL: blocked
-             0.0 ms   0.0%  %GVL: wait
 ```
 
-wall モードでは、`%GVL: blocked` ラベルが支配的なコストを示しています -- これは `io_work` の sleep 時間です。`cpu_work` の CPU 時間は明確に分離されています。GVL や GC のアクティビティはスタックフレームではなくサンプルのラベルとして記録され、pprof の `-tagfocus` フラグ（例: `-tagfocus=%GVL=blocked`）でフィルタリングできます。
+wall モードでは、`%GVL: blocked` ラベルが支配的なコストを示しています -- これは `io_work` の sleep 時間です。`cpu_work` の CPU 時間は明確に分離されています。GVL や GC のアクティビティはスタックフレームではなくサンプルのラベルとして記録され、pprof の `-tagfocus` フラグ（例: `-tagfocus=%GVL=blocked`）でフィルタリングできます。カテゴリごとの時間内訳（CPU 実行、GVL ブロック、GVL 待機、GC マーキング、GC スイーピング）は `rperf stat` で確認できます。
 
 ### Verbose 出力
 
@@ -319,7 +315,8 @@ rperf report --top rperf.json.gz
 | オプション | 説明 |
 |--------|-------------|
 | `--top` | フラットタイムによる上位の関数を出力 |
-| `--text` | pprof テキストサマリーを出力 |
+| `--text` | テキストレポートを出力 |
+| `--html` | 静的 HTML ビューアを標準出力に出力（`.json.gz` のみ） |
 | (デフォルト) | ブラウザでインタラクティブな Web UI を開く |
 
 ## rperf diff

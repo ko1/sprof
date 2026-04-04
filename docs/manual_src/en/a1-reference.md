@@ -121,6 +121,7 @@ These are used internally by the CLI to configure the auto-started profiler:
 | `RPERF_STAT_COMMAND` | string | Command string shown in stat output header |
 | `RPERF_AGGREGATE` | `0` | Disable sample aggregation (return raw samples) |
 | `RPERF_SIGNAL` | integer or `false` | Timer signal (Linux only): signal number, or `false` for nanosleep thread |
+| `RPERF_DEFER` | `1` | Start with timer paused; use `Rperf.profile` to activate |
 | `RPERF_ROOT_PROCESS` | PID string | Root process PID for multi-process session (set by CLI) |
 | `RPERF_SESSION_DIR` | path | Session directory for multi-process profile collection (set by CLI) |
 | `RPERF_TMPDIR` | path | Override base directory for session directories (default: `$XDG_RUNTIME_DIR` or system tmpdir) |

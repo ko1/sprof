@@ -226,13 +226,9 @@ Samples: 80, Frequency: 1000Hz
            253.8 ms  81.4%  Kernel#sleep (<C method>)
            253.8 ms  81.4%  Object#io_work (mixed.rb)
             58.0 ms  18.6%  Object#cpu_work (mixed.rb)
-
- Labels:
-           250.6 ms  80.4%  %GVL: blocked
-             0.0 ms   0.0%  %GVL: wait
 ```
 
-In wall mode, the `%GVL: blocked` label accounts for the dominant cost — this is the sleep time in `io_work`. The CPU time for `cpu_work` is clearly separated. GVL and GC activity appear as labels on samples rather than as stack frames, and can be filtered with pprof's `-tagfocus` flag (e.g., `-tagfocus=%GVL=blocked`).
+In wall mode, the `%GVL: blocked` label accounts for the dominant cost — this is the sleep time in `io_work`. The CPU time for `cpu_work` is clearly separated. GVL and GC activity appear as labels on samples rather than as stack frames, and can be filtered with pprof's `-tagfocus` flag (e.g., `-tagfocus=%GVL=blocked`). Use `rperf stat` to see the time breakdown by category (CPU execution, GVL blocked, GVL wait, GC marking, GC sweeping).
 
 ### Verbose output
 
@@ -323,7 +319,8 @@ The default behavior (without `--top` or `--text`) opens the rperf viewer for JS
 | Option | Description |
 |--------|-------------|
 | `--top` | Print top functions by flat time |
-| `--text` | Print pprof text summary |
+| `--text` | Print text report |
+| `--html` | Output static HTML viewer to stdout (`.json.gz` only) |
 | (default) | Open interactive web UI in browser |
 
 ## rperf diff

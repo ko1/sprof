@@ -902,7 +902,12 @@ module Rperf
     process_count = 0
 
     Dir.glob(File.join(session_dir, "profile-*.json.gz")).each do |file|
-      data = load(file)
+      begin
+        data = load(file)
+      rescue StandardError => e
+        $stderr.puts "rperf: warning: failed to load #{file}: #{e.message}"
+        next
+      end
       next unless data
       _merge_into(merged_samples, merged_label_sets, data, merged_label_sets_index)
       total_trigger_count += (data[:trigger_count] || 0)

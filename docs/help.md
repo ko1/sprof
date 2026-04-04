@@ -200,7 +200,8 @@ nil if profiler was not running; otherwise a Hash:
 ```ruby
 { mode: :cpu,                      # or :wall
   frequency: 500,
-  sampling_count: 1234,
+  trigger_count: 1300,             # number of timer triggers
+  sampling_count: 1234,            # number of timer callbacks (may differ from trigger_count)
   sampling_time_ns: 56789,
   detected_thread_count: 4,        # threads seen during profiling
   start_time_ns: 17740...,         # CLOCK_REALTIME epoch nanos

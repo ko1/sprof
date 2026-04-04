@@ -121,6 +121,7 @@ end
 | `RPERF_STAT_COMMAND` | string | stat 出力ヘッダーに表示するコマンド文字列 |
 | `RPERF_AGGREGATE` | `0` | サンプル集約を無効化（生サンプルを返す） |
 | `RPERF_SIGNAL` | integer または `false` | タイマーシグナル (Linux のみ): シグナル番号、または `false` で nanosleep スレッド |
+| `RPERF_DEFER` | `1` | タイマーを停止状態で開始; `Rperf.profile` で有効化 |
 | `RPERF_ROOT_PROCESS` | PID 文字列 | マルチプロセスセッションのルートプロセス PID (CLI が設定) |
 | `RPERF_SESSION_DIR` | パス | マルチプロセスプロファイル収集用セッションディレクトリ (CLI が設定) |
 | `RPERF_TMPDIR` | パス | セッションディレクトリのベースディレクトリを上書き (デフォルト: `$XDG_RUNTIME_DIR` またはシステム tmpdir) |
