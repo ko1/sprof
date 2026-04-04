@@ -2,6 +2,14 @@
 
 A collection of examples to try out rperf's features.
 
+## Security Note
+
+The Rack and Rails examples expose the rperf profiler viewer without
+authentication. **Do not deploy these configurations in production or on
+shared networks.** Profiling data reveals internal code structure and timing
+information. Add authentication middleware before exposing the viewer in any
+non-local environment.
+
 ## Prerequisites
 
 ```bash

@@ -1539,6 +1539,7 @@ rperf_clear_aggregated_data(rperf_profiler_t *prof)
     prof->stats.sampling_count = 0;
     prof->stats.sampling_total_ns = 0;
     prof->stats.dropped_samples = 0;
+    prof->stats.dropped_aggregation = 0;
 
     /* Reset start timestamps so next snapshot's duration_ns covers
      * only the period since this clear. */

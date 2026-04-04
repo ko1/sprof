@@ -225,7 +225,9 @@ Only works in aggregate mode (the default). Returns nil if not profiling.
 
 When `clear: true` is given, resets aggregated data after taking the snapshot.
 This enables interval-based profiling where each snapshot covers only the
-period since the last clear.
+period since the last clear. Note: the frame table is intentionally retained
+(frame IDs must stay stable for GC safety and thread data consistency), so
+`unique_frames` may accumulate across intervals.
 
 ```ruby
 Rperf.start(frequency: 1000)

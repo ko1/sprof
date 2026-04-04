@@ -1,3 +1,10 @@
+# Minimal Rack app with rperf profiling
+#
+# WARNING: This is a development example only. It exposes the profiler viewer
+# without authentication and binds to all interfaces. Do NOT deploy this
+# configuration in production or on shared networks — profiling data reveals
+# internal code structure and timing.
+
 require_relative "../../lib/rperf"
 require_relative "../../lib/rperf/viewer"
 require_relative "../../lib/rperf/rack"

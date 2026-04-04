@@ -66,6 +66,47 @@ class TestRperfFork < Test::Unit::TestCase
       assert_equal "has_data", lines[1]
     end
   end
+
+  def test_defer_propagation_to_fork_child
+    Rperf.start(frequency: 1000, mode: :wall, defer: true, inherit: :fork)
+
+    rd, wr = IO.pipe
+    pid = fork do
+      rd.close
+      begin
+        # In the child, defer should be active: no samples without profile block
+        5_000_000.times { 1 + 1 }
+        snap = Rperf.snapshot
+        samples_without_profile = snap[:trigger_count]
+
+        # Now use profile block - should collect samples
+        Rperf.profile do
+          5_000_000.times { 1 + 1 }
+        end
+        data = Rperf.stop
+
+        wr.puts samples_without_profile.to_s
+        wr.puts((data[:trigger_count] > samples_without_profile) ? "collected" : "no_samples")
+      rescue => e
+        wr.puts "error"
+        wr.puts "error: #{e.class}: #{e.message}"
+      end
+      wr.close
+    end
+
+    wr.close
+    lines = rd.read.split("\n")
+    rd.close
+    _, status = Process.waitpid2(pid)
+
+    assert status.success?, "Child should exit successfully"
+    assert_equal "0", lines[0],
+      "Child should have 0 triggers without profile block (defer mode)"
+    assert_equal "collected", lines[1],
+      "Child should collect samples inside profile block"
+
+    Rperf.stop
+  end
 end
 
 class TestRperfMultiProcess < Test::Unit::TestCase

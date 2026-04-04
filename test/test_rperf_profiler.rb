@@ -326,4 +326,54 @@ class TestRperfProfiler < Test::Unit::TestCase
     assert_operator total_weight, :>, 50_000_000,
       "Wall mode total weight (#{total_weight}ns) should reflect sleep time"
   end
+
+  # --- Session cleanup on stop ---
+
+  def test_session_cleanup_on_stop
+    Rperf.start(frequency: 100, inherit: :fork)
+    assert_not_nil ENV["RPERF_SESSION_DIR"], "inherit: :fork should set RPERF_SESSION_DIR"
+    sleep 0.02
+    Rperf.stop
+
+    assert_nil ENV["RPERF_SESSION_DIR"],
+      "RPERF_SESSION_DIR should be nil after stop"
+    assert_nil ENV["RPERF_ROOT_PROCESS"],
+      "RPERF_ROOT_PROCESS should be nil after stop"
+
+    # A second start/stop cycle should work without error
+    Rperf.start(frequency: 100, inherit: :fork)
+    assert_not_nil ENV["RPERF_SESSION_DIR"]
+    sleep 0.02
+    data = Rperf.stop
+    assert_not_nil data, "Second session should return data"
+    assert_nil ENV["RPERF_SESSION_DIR"],
+      "RPERF_SESSION_DIR should be nil after second stop"
+    assert_nil ENV["RPERF_ROOT_PROCESS"],
+      "RPERF_ROOT_PROCESS should be nil after second stop"
+  end
+
+  def test_consecutive_inherit_sessions
+    2.times do |i|
+      Rperf.start(frequency: 100, inherit: :fork)
+      sleep 0.05
+      data = Rperf.stop
+      assert_not_nil data, "Session #{i} should return data"
+    end
+  end
+
+  # --- ActiveJob middleware require ---
+
+  def test_active_job_middleware_loadable
+    has_active_support = begin
+      require "active_support/concern"
+      true
+    rescue LoadError
+      false
+    end
+    skip "active_support not available" unless has_active_support
+
+    require "rperf/active_job"
+    assert defined?(Rperf::ActiveJobMiddleware),
+      "Rperf::ActiveJobMiddleware should be defined after require"
+  end
 end

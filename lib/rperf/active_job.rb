@@ -1,4 +1,5 @@
 require "rperf"
+require "active_support/concern"
 
 module Rperf::ActiveJobMiddleware
   extend ActiveSupport::Concern

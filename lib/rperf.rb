@@ -64,7 +64,7 @@ module Rperf
 
     # Set up child process tracking
     if inherit && !ENV["RPERF_SESSION_DIR"]
-      _setup_inherit(mode, frequency, signal, aggregate, output, format, stat, inherit)
+      _setup_inherit(mode, frequency, signal, aggregate, output, format, stat, inherit, defer)
     end
 
     if block_given?
@@ -135,11 +135,21 @@ module Rperf
         save(File.join(session_dir, "profile-#{Process.pid}.json.gz"), data, format: :json)
       end
       merged = _aggregate_and_report
+      _cleanup_session_state
       return merged || data
     end
 
+    _cleanup_session_state
     data
   end
+
+  def self._cleanup_session_state
+    ENV.delete("RPERF_SESSION_DIR")
+    ENV.delete("RPERF_ROOT_PROCESS")
+    ENV.delete("RPERF_DEFER")
+    @_session_dir_created = false
+  end
+  private_class_method :_cleanup_session_state
 
   # Returns a snapshot of the current profiling data without stopping.
   # Only works in aggregate mode (the default). Returns nil if not profiling.
@@ -589,7 +599,12 @@ module Rperf
 
   def self.print_stat_footer(samples_raw, real_ns, data)
     triggers = data[:trigger_count] || 0
-    overhead_pct = real_ns > 0 ? (data[:sampling_time_ns] || 0) * 100.0 / real_ns : 0.0
+    sampling_time_ns = data[:sampling_time_ns] || 0
+    process_count = data[:process_count] || 1
+    # In multi-process mode, sampling_time_ns is the sum across all processes,
+    # but real_ns is only the root process's wall time. Divide by process_count
+    # to get the average per-process overhead.
+    overhead_pct = real_ns > 0 ? sampling_time_ns * 100.0 / (real_ns * [process_count, 1].max) : 0.0
     $stderr.puts
     samples = data[:sampling_count] || samples_raw.size
     $stderr.puts format("  %d samples / %d triggers, %.1f%% profiler overhead",
@@ -673,7 +688,7 @@ module Rperf
 
   # Set up child process tracking from Rperf.start(inherit: ...).
   # Called only when NOT already inside a CLI-managed session (no RPERF_SESSION_DIR).
-  def self._setup_inherit(mode, frequency, signal, aggregate, output, format, stat, inherit)
+  def self._setup_inherit(mode, frequency, signal, aggregate, output, format, stat, inherit, defer)
     require "securerandom"
     require "tmpdir"
 
@@ -696,6 +711,7 @@ module Rperf
     session_dir = File.join(user_dir, "rperf-#{Process.pid}-#{SecureRandom.hex(4)}")
     ENV["RPERF_ROOT_PROCESS"] = Process.pid.to_s
     ENV["RPERF_SESSION_DIR"] = session_dir
+    ENV["RPERF_DEFER"] = "1" if defer
 
     # Save original output settings for aggregation
     @_aggregate_output = output
@@ -711,7 +727,7 @@ module Rperf
       ENV["RPERF_MODE"] = mode.to_s
       ENV["RPERF_SIGNAL"] = signal.nil? ? nil : signal.to_s
       ENV["RPERF_AGGREGATE"] = aggregate ? nil : "0"
-      lib_dir = File.expand_path("../..", __FILE__)
+      lib_dir = File.expand_path("..", __FILE__)
       ENV["RUBYLIB"] = [lib_dir, ENV["RUBYLIB"]].compact.join(File::PATH_SEPARATOR)
       ENV["RUBYOPT"] = "-rrperf #{ENV['RUBYOPT']}".strip
     end
@@ -815,6 +831,7 @@ module Rperf
     }
     sig = _parse_signal_env
     opts[:signal] = sig unless sig.nil?
+    opts[:defer] = true if ENV["RPERF_DEFER"] == "1"
 
     start(**opts, inherit: false)
     label("%pid": Process.pid.to_s)
@@ -953,6 +970,7 @@ module Rperf
                           verbose: ENV["RPERF_VERBOSE"] == "1",
                           aggregate: _rperf_aggregate }
     _rperf_start_opts[:signal] = _rperf_signal unless _rperf_signal.nil?
+    _rperf_start_opts[:defer] = true if ENV["RPERF_DEFER"] == "1"
 
     if ENV["RPERF_SESSION_DIR"] && Process.pid.to_s != ENV["RPERF_ROOT_PROCESS"]
       # spawn / fork+exec child: write to session dir, no aggregation.
@@ -966,6 +984,8 @@ module Rperf
             Dir.mkdir(_rperf_user_dir, 0700)
           rescue Errno::EEXIST
             # race — fine
+          rescue SystemCallError
+            # graceful degradation
           end
         end
         if File.directory?(_rperf_user_dir)
@@ -981,6 +1001,9 @@ module Rperf
             Dir.mkdir(_rperf_session_dir, 0700)
           rescue Errno::EEXIST
             # another child already created it — fine
+          rescue SystemCallError
+            # graceful degradation
+            _rperf_session_dir = nil
           end
         end
       end
