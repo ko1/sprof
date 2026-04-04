@@ -481,8 +481,8 @@ module Rperf
       if label_sets && label_set_id && label_set_id > 0
         ls = label_sets[label_set_id]
         if ls
-          gvl = ls[:"%GVL"] || ls["%GVL"]
-          gc  = ls[:"%GC"]  || ls["%GC"]
+          gvl = ls[:"%GVL"]
+          gc  = ls[:"%GC"]
           if gvl == "blocked"    then category = :gvl_blocked
           elsif gvl == "wait"    then category = :gvl_wait
           elsif gc  == "mark"    then category = :gc_marking

@@ -54,7 +54,7 @@ class TestRperfGvl < Test::Unit::TestCase
     label_sets = data[:label_sets] || []
     gvl_samples = data[:aggregated_samples].select { |_, _, _, label_set_id|
       ls = label_sets[label_set_id]
-      ls && ls["%GVL"]
+      ls && ls[:"%GVL"]
     }
 
     gvl_samples.each do |_, weight|
@@ -102,7 +102,7 @@ class TestRperfGvl < Test::Unit::TestCase
     label_sets = data[:label_sets] || []
     gc_samples = data[:aggregated_samples].select { |_, _, _, label_set_id|
       ls = label_sets[label_set_id]
-      ls && ls["%GC"]
+      ls && ls[:"%GC"]
     }
 
     gc_samples.each do |_, weight|
@@ -141,8 +141,8 @@ class TestRperfGvl < Test::Unit::TestCase
     data[:aggregated_samples].each do |_, _, _, lsi|
       ls = label_sets[lsi]
       next unless ls
-      gvl = ls[:"%GVL"] || ls["%GVL"]
-      gc  = ls[:"%GC"]  || ls["%GC"]
+      gvl = ls[:"%GVL"]
+      gc  = ls[:"%GC"]
       result << "GVL:#{gvl}" if gvl
       result << "GC:#{gc}" if gc
     end

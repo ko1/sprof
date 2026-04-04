@@ -119,17 +119,17 @@ class TestRperfMultiProcess < Test::Unit::TestCase
 
     data1 = {
       aggregated_samples: [[[["/a.rb", "A#a"]], 1000, 0, 1]],
-      label_sets: [{}, { "%pid" => "100" }],
+      label_sets: [{}, { :"%pid" => "100" }],
     }
     data2 = {
       aggregated_samples: [[[["/b.rb", "B#b"]], 2000, 0, 1]],
-      label_sets: [{}, { "%pid" => "200" }],
+      label_sets: [{}, { :"%pid" => "200" }],
     }
 
     Rperf.send(:_merge_into, merged_samples, merged_label_sets, data1)
     Rperf.send(:_merge_into, merged_samples, merged_label_sets, data2)
 
-    assert_equal 3, merged_label_sets.size  # {}, {"%pid"=>"100"}, {"%pid"=>"200"}
+    assert_equal 3, merged_label_sets.size  # {}, {:"%pid"=>"100"}, {:"%pid"=>"200"}
     # data1's label_set_id 1 maps to merged 1
     assert_equal 1, merged_samples[0][3]
     # data2's label_set_id 1 maps to merged 2 (different pid)
@@ -219,9 +219,9 @@ class TestRperfMultiProcess < Test::Unit::TestCase
     assert_not_nil label_sets
 
     # Find a label set with %pid key matching child PID
-    pid_labels = label_sets.select { |ls| ls.key?(:"%pid") || ls.key?("%pid") }
+    pid_labels = label_sets.select { |ls| ls.key?(:"%pid") }
     assert_operator pid_labels.size, :>, 0, "Child should have %pid label"
-    pid_values = pid_labels.map { |ls| (ls[:"%pid"] || ls["%pid"]).to_i }
+    pid_values = pid_labels.map { |ls| ls[:"%pid"].to_i }
     assert_include pid_values, child_pid, "Child PID should match"
   end
 

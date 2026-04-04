@@ -50,7 +50,7 @@ class TestRperfMultiprocessCli < Test::Unit::TestCase
   # Helper: find distinct %pid values in label_sets
   def distinct_pids(data)
     ls = data[:label_sets] || []
-    ls.map { |h| h[:"%pid"] || h["%pid"] }.compact.uniq
+    ls.map { |h| h[:"%pid"] }.compact.uniq
   end
 
   # Helper: check if a method name appears in aggregated_samples
@@ -259,7 +259,7 @@ class TestRperfMultiprocessCli < Test::Unit::TestCase
       ls = data[:label_sets] || []
       root_samples = (data[:aggregated_samples] || []).select do |_, _, _, lsi|
         lbl = ls[lsi] || {}
-        !lbl.key?(:"%pid") && !lbl.key?("%pid")
+        !lbl.key?(:"%pid")
       end
       assert_operator root_samples.size, :>, 0, "root should have samples without %pid"
     end
@@ -296,8 +296,8 @@ class TestRperfMultiprocessCli < Test::Unit::TestCase
       assert_equal 0, status.exitstatus
       data = load_profile(outfile)
       ls = data[:label_sets] || []
-      has_gvl_blocked = ls.any? { |h| (h[:"%GVL"] || h["%GVL"]) == "blocked" }
-      has_plain = ls.any? { |h| !h.key?(:"%GVL") && !h.key?("%GVL") && !h.key?(:"%GC") && !h.key?("%GC") }
+      has_gvl_blocked = ls.any? { |h| h[:"%GVL"] == "blocked" }
+      has_plain = ls.any? { |h| !h.key?(:"%GVL") && !h.key?(:"%GC") }
       assert has_gvl_blocked, "GVL blocked label should be present from sleeping child"
       assert has_plain, "CPU-only samples should be present"
       assert_equal 3, data[:process_count]
@@ -323,7 +323,7 @@ class TestRperfMultiprocessCli < Test::Unit::TestCase
       assert_equal "cpu", data[:mode].to_s
       assert_equal 2, data[:process_count]
       ls = data[:label_sets] || []
-      has_gvl = ls.any? { |h| h.key?(:"%GVL") || h.key?("%GVL") }
+      has_gvl = ls.any? { |h| h.key?(:"%GVL") }
       assert !has_gvl, "CPU mode should not have GVL labels"
       assert has_method?(data, "cpu_r")
       assert has_method?(data, "cpu_c")
@@ -348,7 +348,7 @@ class TestRperfMultiprocessCli < Test::Unit::TestCase
       ls = data[:label_sets] || []
       gvl_blocked_weight = (data[:aggregated_samples] || []).select { |_, _, _, lsi|
         lbl = ls[lsi] || {}
-        (lbl[:"%GVL"] || lbl["%GVL"]) == "blocked"
+        lbl[:"%GVL"] == "blocked"
       }.sum { |_, w, *| w }
       # sleep 0.3 should produce >= 200ms of GVL blocked time
       assert_operator gvl_blocked_weight / 1_000_000, :>=, 200,
@@ -418,7 +418,7 @@ class TestRperfMultiprocessCli < Test::Unit::TestCase
       pid_weights = Hash.new(0)
       (data[:aggregated_samples] || []).each do |_, weight, _, lsi|
         lbl = ls[lsi] || {}
-        pid_val = lbl[:"%pid"] || lbl["%pid"]
+        pid_val = lbl[:"%pid"]
         next unless pid_val
         pid_weights[pid_val] += weight
       end
