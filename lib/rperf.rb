@@ -616,7 +616,7 @@ module Rperf
     end
     process_count = data[:process_count] if data
     if process_count && process_count > 1
-      $stderr.puts STAT_LINE.call("", "  ", "(user/sys/GC/OS stats are from root process only; [Rperf] lines are aggregated)")
+      $stderr.puts STAT_LINE.call("", "  ", "(GC/OS stats are from root process only; user/sys/[Rperf] lines are aggregated)")
     end
   end
   private_class_method :print_stat_system_info
