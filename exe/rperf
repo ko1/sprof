@@ -366,69 +366,11 @@ end
 
 # Multi-process (fork) support: create a session directory for aggregation
 if inherit
-  require "securerandom"
-  require "tmpdir"
-
-  # Compute session dir path (directory is created lazily on first fork)
-  bases = [ENV["RPERF_TMPDIR"], ENV["XDG_RUNTIME_DIR"], Dir.tmpdir].compact
-  user_dir = nil
-
-  bases.each do |base|
-    candidate = File.join(base, "rperf-#{Process.uid}")
-    if File.directory?(candidate)
-      # Verify ownership and permissions of existing directory
-      st = File.stat(candidate)
-      unless st.owned? && (st.mode & 0777) == 0700
-        $stderr.puts "rperf: error: #{candidate} exists but is not owned by you or has insecure permissions " \
-                     "(owner=#{st.uid} mode=#{'%04o' % (st.mode & 0777)}, expected owner=#{Process.uid} mode=0700)"
-        exit 1
-      end
-      user_dir = candidate
-      break
-    elsif File.writable?(base)
-      user_dir = candidate
-      break
-    end
-  end
-
-  if user_dir
-    # Clean up stale session dirs from crashed processes
-    if File.directory?(user_dir)
-      Dir.glob(File.join(user_dir, "rperf-*")).each do |dir|
-        m = File.basename(dir).match(/\Arperf-(\d+)-/)
-        next unless m
-        pid = m[1].to_i
-        begin
-          Process.kill(0, pid) # alive → skip
-        rescue Errno::ESRCH   # dead → cleanup
-          FileUtils.rm_rf(dir)
-        rescue Errno::EPERM   # not ours → skip
-        end
-      end
-    end
-
-    # Create session directory eagerly.  If creation fails, fall back to
-    # single-process mode (don't set env vars → inherit disabled).
-    unless File.directory?(user_dir)
-      begin
-        Dir.mkdir(user_dir, 0700)
-      rescue Errno::EEXIST
-        # race — fine
-      rescue SystemCallError
-        user_dir = nil
-      end
-    end
-
-    if user_dir
-      session_dir = File.join(user_dir, "rperf-#{Process.pid}-#{SecureRandom.hex(4)}")
-      begin
-        Dir.mkdir(session_dir, 0700)
-        ENV["RPERF_ROOT_PROCESS"] = Process.pid.to_s
-        ENV["RPERF_SESSION_DIR"] = session_dir
-      rescue SystemCallError
-        # Session dir creation failed — continue without inherit
-      end
-    end
+  require_relative "../lib/rperf"
+  session_dir = Rperf.send(:_create_session_dir, clean_stale: true)
+  if session_dir
+    ENV["RPERF_ROOT_PROCESS"] = Process.pid.to_s
+    ENV["RPERF_SESSION_DIR"] = session_dir
   end
 end
 

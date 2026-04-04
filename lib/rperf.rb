@@ -734,46 +734,59 @@ module Rperf
 
   # Create session directory eagerly.  Returns the session dir path on success,
   # nil on failure (caller should fall back to single-process mode).
-  def self._create_session_dir
+  # Try each candidate base in order.  If user_dir looks usable but
+  # session_dir creation fails (quota, ACL, sandbox, etc.), fall through
+  # to the next base instead of giving up.
+  # When clean_stale: true, removes session dirs from dead processes.
+  def self._create_session_dir(clean_stale: false)
     require "securerandom"
     require "tmpdir"
 
     bases = [ENV["RPERF_TMPDIR"], ENV["XDG_RUNTIME_DIR"], Dir.tmpdir].compact
-    user_dir = nil
     bases.each do |base|
-      candidate = File.join(base, "rperf-#{Process.uid}")
-      if File.directory?(candidate)
-        st = File.stat(candidate)
+      user_dir = File.join(base, "rperf-#{Process.uid}")
+
+      if File.directory?(user_dir)
+        st = File.stat(user_dir) rescue next
         next unless st.owned? && (st.mode & 0777) == 0700
-        user_dir = candidate
-        break
       elsif File.writable?(base)
-        user_dir = candidate
-        break
+        begin
+          Dir.mkdir(user_dir, 0700)
+        rescue Errno::EEXIST
+          st = File.stat(user_dir) rescue next
+          next unless st.owned? && (st.mode & 0777) == 0700
+        rescue SystemCallError
+          next
+        end
+      else
+        next
       end
-    end
-    return unless user_dir
 
-    # Create user dir if needed
-    unless File.directory?(user_dir)
+      if clean_stale
+        require "fileutils"
+        Dir.glob(File.join(user_dir, "rperf-*")).each do |dir|
+          m = File.basename(dir).match(/\Arperf-(\d+)-/)
+          next unless m
+          pid = m[1].to_i
+          begin
+            Process.kill(0, pid)
+          rescue Errno::ESRCH
+            FileUtils.rm_rf(dir)
+          rescue Errno::EPERM
+            # not ours
+          end
+        end
+      end
+
+      session_dir = File.join(user_dir, "rperf-#{Process.pid}-#{SecureRandom.hex(4)}")
       begin
-        Dir.mkdir(user_dir, 0700)
-      rescue Errno::EEXIST
-        st = File.stat(user_dir)
-        return unless st.owned? && (st.mode & 0777) == 0700
+        Dir.mkdir(session_dir, 0700)
+        return session_dir
       rescue SystemCallError
-        return
+        next
       end
     end
-
-    # Create session dir
-    session_dir = File.join(user_dir, "rperf-#{Process.pid}-#{SecureRandom.hex(4)}")
-    begin
-      Dir.mkdir(session_dir, 0700)
-    rescue SystemCallError
-      return
-    end
-    session_dir
+    nil
   end
   private_class_method :_create_session_dir
 
