@@ -6,6 +6,23 @@ require "zlib"
 module RperfTestHelper
   def teardown
     Rperf.stop rescue nil
+    # Clean up env vars and state that may have been set by Rperf.start(inherit: ...)
+    ENV.delete("RPERF_SESSION_DIR")
+    ENV.delete("RPERF_ROOT_PROCESS")
+    ENV.delete("RPERF_ENABLED")
+    Rperf.instance_variable_set(:@_session_dir_created, false)
+    Rperf.instance_variable_set(:@_aggregate_output, nil)
+    Rperf.instance_variable_set(:@_aggregate_stat, false)
+    Rperf.instance_variable_set(:@_aggregate_format, nil)
+    # Clean up session dirs that may have been created
+    require "tmpdir"
+    user_dir = File.join(Dir.tmpdir, "rperf-#{Process.uid}")
+    if File.directory?(user_dir)
+      require "fileutils"
+      Dir.glob(File.join(user_dir, "rperf-*")).each do |dir|
+        FileUtils.rm_rf(dir)
+      end
+    end
   end
 
   private

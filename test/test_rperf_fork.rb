@@ -4,7 +4,7 @@ class TestRperfFork < Test::Unit::TestCase
   include RperfTestHelper
 
   def test_fork_stops_profiling_in_child
-    Rperf.start(frequency: 100)
+    Rperf.start(frequency: 100, inherit: false)
 
     rd, wr = IO.pipe
     pid = fork do
@@ -12,7 +12,7 @@ class TestRperfFork < Test::Unit::TestCase
       result = Rperf.stop
       wr.puts(result.nil? ? "nil" : "not_nil")
 
-      Rperf.start(frequency: 100)
+      Rperf.start(frequency: 100, inherit: false)
       1_000_000.times { 1 + 1 }
       data = Rperf.stop
       wr.puts(data.nil? ? "no_data" : "has_data")
@@ -39,7 +39,7 @@ class TestRperfFork < Test::Unit::TestCase
     # signal that kills the process after fork (exit code 128+42).
     10.times do
       3.times do
-        Rperf.start(frequency: 1000)
+        Rperf.start(frequency: 1000, inherit: false)
         200_000.times { 1 + 1 }
         Rperf.stop
       end
@@ -49,7 +49,7 @@ class TestRperfFork < Test::Unit::TestCase
         rd.close
         result = Rperf.stop
         wr.puts(result.nil? ? "nil" : "non_nil")
-        Rperf.start(frequency: 100)
+        Rperf.start(frequency: 100, inherit: false)
         100_000.times { 1 + 1 }
         data = Rperf.stop
         wr.puts(data.nil? ? "no_data" : "has_data")
@@ -159,52 +159,39 @@ class TestRperfMultiProcess < Test::Unit::TestCase
   end
 
   def test_fork_with_session_dir
-    # Simulate multi-process mode by setting env vars and using _fork hook
-    ENV["RPERF_SESSION_DIR"] = @session_dir
-    ENV["RPERF_ROOT_PROCESS"] = Process.pid.to_s
+    # Use inherit: :fork to set up multi-process tracking via API
+    Rperf.start(frequency: 1000, mode: :wall, inherit: :fork)
 
-    Rperf.send(:_install_fork_hook)
+    session_dir = ENV["RPERF_SESSION_DIR"]
+    assert_not_nil session_dir, "inherit: :fork should set RPERF_SESSION_DIR"
 
-    Rperf.start(frequency: 1000, mode: :wall)
-    # Write root's output to session dir
-    Rperf.instance_variable_set(:@output, File.join(@session_dir, "profile-#{Process.pid}.json.gz"))
-    Rperf.instance_variable_set(:@format, :json)
-
+    rd, wr = IO.pipe
     pid = fork do
-      # _restart_in_child is called by _fork hook
-      500_000.times { 1 + 1 }
-      Rperf.stop
-      exit!(0)
+      rd.close
+      begin
+        # _restart_in_child is called by _fork hook
+        500_000.times { 1 + 1 }
+        Rperf.stop
+        wr.puts "ok"
+      rescue => e
+        wr.puts "error: #{e.class}: #{e.message}"
+      end
+      wr.close
     end
 
-    500_000.times { 1 + 1 }
+    wr.close
+    child_output = rd.read.strip
+    rd.close
     _, status = Process.waitpid2(pid)
-    assert status.success?, "Child should exit successfully"
+    assert status.success?, "Child failed: #{child_output}"
+    assert_equal "ok", child_output
 
-    Rperf.stop
-
-    # Both root and child should have written profiles
-    profiles = Dir.glob(File.join(@session_dir, "profile-*.json.gz"))
-    assert_equal 2, profiles.size, "Should have 2 profile files (root + child)"
-
-    # Load and verify each profile has data
-    profiles.each do |f|
-      data = Rperf.load(f)
-      assert_not_nil data
-      assert_not_nil data[:aggregated_samples]
-      assert_not_nil data[:pid]
-      assert_not_nil data[:ppid]
-    end
+    Rperf.stop  # writes root profile + aggregates
   end
 
   def test_fork_child_gets_pid_label
-    ENV["RPERF_SESSION_DIR"] = @session_dir
-    ENV["RPERF_ROOT_PROCESS"] = Process.pid.to_s
-
-    Rperf.send(:_install_fork_hook)
-    Rperf.start(frequency: 1000, mode: :wall)
-    Rperf.instance_variable_set(:@output, File.join(@session_dir, "profile-#{Process.pid}.json.gz"))
-    Rperf.instance_variable_set(:@format, :json)
+    Rperf.start(frequency: 1000, mode: :wall, output: File.join(@session_dir, "merged.json.gz"),
+                format: :json, inherit: :fork)
 
     child_pid = nil
     rd, wr = IO.pipe
@@ -223,18 +210,19 @@ class TestRperfMultiProcess < Test::Unit::TestCase
     _, status = Process.waitpid2(pid)
     assert status.success?
 
-    Rperf.stop
+    Rperf.stop  # aggregates into merged.json.gz
 
-    # Load child's profile and check for %pid label
-    child_profile = File.join(@session_dir, "profile-#{child_pid}.json.gz")
-    assert File.exist?(child_profile), "Child profile should exist"
-    data = Rperf.load(child_profile)
+    merged_file = File.join(@session_dir, "merged.json.gz")
+    assert File.exist?(merged_file), "Merged output should exist"
+    data = Rperf.load(merged_file)
     label_sets = data[:label_sets]
     assert_not_nil label_sets
 
-    # Find a label set with %pid key
+    # Find a label set with %pid key matching child PID
     pid_labels = label_sets.select { |ls| ls.key?(:"%pid") || ls.key?("%pid") }
     assert_operator pid_labels.size, :>, 0, "Child should have %pid label"
+    pid_values = pid_labels.map { |ls| (ls[:"%pid"] || ls["%pid"]).to_i }
+    assert_include pid_values, child_pid, "Child PID should match"
   end
 
   def test_aggregate_and_report_merges_profiles

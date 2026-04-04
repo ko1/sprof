@@ -125,6 +125,10 @@ Limitations:
   only cover the current process.
 - Only Ruby child processes are profiled; non-Ruby children (shell
   scripts, Python, etc.) are not affected.
+- Child processes that use rperf independently (Rperf.start in their
+  own code) will conflict with the inherited auto-start session.
+  Such programs should clear RPERF_ENABLED from their environment
+  before requiring rperf.
 
 ### Examples
 
@@ -175,6 +179,7 @@ Rperf.save("profile.txt", data)
     verbose:    Print statistics to stderr (true/false, default: false)
     format:     :json, :pprof, :collapsed, :text, or nil for auto-detect (Symbol or nil)
     defer:      Start with timer paused; use Rperf.profile to activate (default: false)
+    inherit:    Child process tracking: :fork (default), true (fork+spawn), false (none)
 
 ### Rperf.stop return value
 

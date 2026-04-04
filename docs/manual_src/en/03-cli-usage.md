@@ -413,6 +413,7 @@ The stat output shows aggregated data from both processes, with a "Ruby processe
 - **Daemon children**: Processes that call `Process.daemon` and outlive the parent will have their profiles lost — the parent aggregates and cleans up the session directory at exit.
 - **Cross-process snapshots**: `Rperf.snapshot` only covers the current process. There is no way to snapshot all children simultaneously.
 - **Non-Ruby children**: Only Ruby child processes are profiled. Shell scripts, Python processes, etc. are not affected by rperf.
+- **Independent rperf users**: Child processes that use rperf independently (`Rperf.start` in their own code) will conflict with the inherited auto-start session. Such programs should clear `RPERF_ENABLED` from their environment before requiring rperf.
 
 ## rperf help
 

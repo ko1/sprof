@@ -24,10 +24,19 @@ module Rperf
   #   .collapsed → collapsed stacks (FlameGraph / speedscope compatible)
   #   .txt       → text report (human/AI readable flat + cumulative table)
   #   .pb.gz     → pprof protobuf (gzip compressed)
-  def self.start(frequency: 1000, mode: :cpu, output: nil, verbose: false, format: nil, stat: false, signal: nil, aggregate: true, defer: false)
+  # inherit: controls child process profiling.
+  #   :fork  — (default) automatically profile forked child processes via Process._fork hook.
+  #            Session dir is created lazily on first fork. Spawned processes are NOT tracked.
+  #   true   — profile both forked and spawned Ruby child processes. Sets RUBYOPT=-rrperf
+  #            and RPERF_* env vars so spawned Ruby processes auto-start profiling.
+  #            Use with caution: affects ALL spawned Ruby processes, including independent
+  #            programs that may use rperf themselves.
+  #   false  — do not track child processes (single-process mode).
+  def self.start(frequency: 1000, mode: :cpu, output: nil, verbose: false, format: nil, stat: false, signal: nil, aggregate: true, defer: false, inherit: :fork)
     raise ArgumentError, "frequency must be a positive integer (got #{frequency.inspect})" unless frequency.is_a?(Integer) && frequency > 0
     raise ArgumentError, "frequency must be <= 10000 (10KHz), got #{frequency}" if frequency > 10_000
     raise ArgumentError, "mode must be :cpu or :wall, got #{mode.inspect}" unless %i[cpu wall].include?(mode)
+    raise ArgumentError, "inherit must be :fork, true, or false, got #{inherit.inspect}" unless [true, false, :fork].include?(inherit)
     c_mode = mode == :cpu ? 0 : 1
     unless signal.nil? || signal == false || signal.is_a?(Integer)
       raise ArgumentError, "signal must be nil, false, or an Integer, got #{signal.inspect}"
@@ -53,6 +62,11 @@ module Rperf
     @label_set_index = nil
     _c_start(frequency, c_mode, aggregate, c_signal, defer)
 
+    # Set up child process tracking
+    if inherit && !ENV["RPERF_SESSION_DIR"]
+      _setup_inherit(mode, frequency, signal, aggregate, output, format, stat, inherit)
+    end
+
     if block_given?
       begin
         yield
@@ -73,6 +87,18 @@ module Rperf
   }.freeze
 
   def self.stop
+    # Check if we need to aggregate child process data (API inherit mode)
+    session_dir = ENV["RPERF_SESSION_DIR"]
+    needs_aggregation = session_dir &&
+                        Process.pid.to_s == ENV["RPERF_ROOT_PROCESS"] &&
+                        (@_session_dir_created || File.directory?(session_dir.to_s))
+
+    if needs_aggregation && !@_session_dir_created
+      # spawn case: suppress individual output, aggregation will handle it
+      @stat = false
+      @output = nil
+    end
+
     data = _c_stop
     return unless data
 
@@ -100,6 +126,16 @@ module Rperf
       write_data(@output, data, @format)
       @output = nil
       @format = nil
+    end
+
+    # Aggregate child process data if needed
+    if needs_aggregation
+      if data && !@_session_dir_created && File.directory?(session_dir)
+        # spawn case: root's data wasn't written to session dir, write it now
+        save(File.join(session_dir, "profile-#{Process.pid}.json.gz"), data, format: :json)
+      end
+      merged = _aggregate_and_report
+      return merged || data
     end
 
     data
@@ -613,6 +649,53 @@ module Rperf
   @_aggregate_stat = false
   @_aggregate_format = nil
 
+  # Set up child process tracking from Rperf.start(inherit: ...).
+  # Called only when NOT already inside a CLI-managed session (no RPERF_SESSION_DIR).
+  def self._setup_inherit(mode, frequency, signal, aggregate, output, format, stat, inherit)
+    require "securerandom"
+    require "tmpdir"
+
+    bases = [ENV["RPERF_TMPDIR"], ENV["XDG_RUNTIME_DIR"], Dir.tmpdir].compact
+    user_dir = nil
+    bases.each do |base|
+      candidate = File.join(base, "rperf-#{Process.uid}")
+      if File.directory?(candidate)
+        st = File.stat(candidate)
+        next unless st.owned? && (st.mode & 0777) == 0700
+        user_dir = candidate
+        break
+      elsif File.writable?(base)
+        user_dir = candidate
+        break
+      end
+    end
+    return unless user_dir
+
+    session_dir = File.join(user_dir, "rperf-#{Process.pid}-#{SecureRandom.hex(4)}")
+    ENV["RPERF_ROOT_PROCESS"] = Process.pid.to_s
+    ENV["RPERF_SESSION_DIR"] = session_dir
+
+    # Save original output settings for aggregation
+    @_aggregate_output = output
+    @_aggregate_stat = stat
+    @_aggregate_format = format
+
+    _install_fork_hook
+
+    if inherit == true
+      # inherit: true — also track spawned Ruby children via RUBYOPT
+      ENV["RPERF_ENABLED"] = "1"
+      ENV["RPERF_FREQUENCY"] = frequency.to_s
+      ENV["RPERF_MODE"] = mode.to_s
+      ENV["RPERF_SIGNAL"] = signal.nil? ? nil : signal.to_s
+      ENV["RPERF_AGGREGATE"] = aggregate ? nil : "0"
+      lib_dir = File.expand_path("../..", __FILE__)
+      ENV["RUBYLIB"] = [lib_dir, ENV["RUBYLIB"]].compact.join(File::PATH_SEPARATOR)
+      ENV["RUBYOPT"] = "-rrperf #{ENV['RUBYOPT']}".strip
+    end
+  end
+  private_class_method :_setup_inherit
+
   def self._parse_signal_env
     case ENV["RPERF_SIGNAL"]
     when nil then nil
@@ -711,8 +794,11 @@ module Rperf
     sig = _parse_signal_env
     opts[:signal] = sig unless sig.nil?
 
-    start(**opts)
+    start(**opts, inherit: false)
     label("%pid": Process.pid.to_s)
+
+    # Register at_exit so child's profile is written even without explicit stop
+    at_exit { Rperf.stop }
   end
 
   def self._aggregate_and_report
@@ -756,8 +842,11 @@ module Rperf
 
     require "fileutils"
     FileUtils.rm_rf(session_dir)
+
+    merged_data
   rescue => e
     $stderr.puts "rperf: warning: failed to aggregate multi-process data: #{e.message}"
+    nil
   end
   # Not private — called from at_exit block which runs in top-level context
 
@@ -842,7 +931,7 @@ module Rperf
         _rperf_start_opts[:verbose] = false
 
         _install_fork_hook
-        start(**_rperf_start_opts)
+        start(**_rperf_start_opts, inherit: false)
         label("%pid": Process.pid.to_s)
         at_exit { stop }
       else
@@ -850,7 +939,7 @@ module Rperf
         _rperf_start_opts[:output] = _rperf_original_output
         _rperf_start_opts[:format] = _rperf_format
         _rperf_start_opts[:stat] = _rperf_stat
-        start(**_rperf_start_opts)
+        start(**_rperf_start_opts, inherit: false)
         at_exit { stop }
       end
     elsif ENV["RPERF_SESSION_DIR"]
@@ -866,34 +955,14 @@ module Rperf
       _rperf_start_opts[:stat] = _rperf_stat
 
       _install_fork_hook
-      start(**_rperf_start_opts)
+      start(**_rperf_start_opts, inherit: false)
 
-      at_exit {
-        session_dir = ENV["RPERF_SESSION_DIR"].to_s
-        has_children = Process.pid.to_s == ENV["RPERF_ROOT_PROCESS"] &&
-                       File.directory?(session_dir)
-
-        if has_children && !Rperf.instance_variable_get(:@_session_dir_created)
-          # spawn case: _on_first_fork didn't fire. Suppress individual output
-          # so aggregation handles everything.
-          Rperf.instance_variable_set(:@stat, false)
-          Rperf.instance_variable_set(:@output, nil)
-        end
-
-        data = Rperf.stop
-
-        if has_children
-          # Write root's profile to session dir if not already there (spawn case)
-          if data && !Rperf.instance_variable_get(:@_session_dir_created)
-            Rperf.save(File.join(session_dir, "profile-#{Process.pid}.json.gz"), data, format: :json)
-          end
-          Rperf._aggregate_and_report
-        end
-      }
+      at_exit { Rperf.stop }
     else
       _rperf_start_opts[:output] = _rperf_original_output
       _rperf_start_opts[:format] = _rperf_format
       _rperf_start_opts[:stat] = _rperf_stat
+      _rperf_start_opts[:inherit] = false  # no RPERF_SESSION_DIR means --no-inherit
       start(**_rperf_start_opts)
       at_exit { stop }
     end

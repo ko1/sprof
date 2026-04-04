@@ -79,6 +79,7 @@ data = Rperf.stop
 | `signal:` | Integer/Boolean | `nil` | Linux のみ: `nil` = タイマーシグナル（デフォルト）、`false` = nanosleep スレッド、正の整数 = 特定の RT シグナル番号 |
 | `aggregate:` | Boolean | `true` | 同一スタックをプロファイリング中に集約してメモリを削減。`false` は生のサンプルごとのデータを返す |
 | `defer:` | Boolean | `false` | タイマーを一時停止した状態で開始。特定のセクションのサンプリングを有効にするには [`Rperf.profile`](#index:Rperf.profile) ブロックを使用 |
+| `inherit:` | `:fork`, `true`, or `false` | `:fork` | 子プロセスの追跡を制御。`:fork` は `Process._fork` フックで fork された子を追跡。`true` は spawn された Ruby 子も追跡（`RUBYOPT=-rrperf` を設定）。`false` は子プロセス追跡を無効化 |
 
 ## Rperf.stop の戻り値
 
