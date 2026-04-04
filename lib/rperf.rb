@@ -17,6 +17,7 @@ module Rperf
   @output = nil
   @stat = false
   @stat_start_mono = nil
+  @_session_dir_output = false  # true when @output points to a session dir (child/fork)
 
   # Starts profiling.
   # format: :json, :pprof, :collapsed, or :text. nil = auto-detect from output extension
@@ -131,12 +132,16 @@ module Rperf
     print_stat(data) if @stat
 
     if @output
-      begin
+      if @_session_dir_output
+        begin
+          write_data(@output, data, @format)
+        rescue SystemCallError
+          # Parent may have already cleaned up the session dir (e.g., parent
+          # exited first and rm_rf'd it), or disk is full. Silently skip —
+          # crashing in at_exit is worse than losing one child's profile.
+        end
+      else
         write_data(@output, data, @format)
-      rescue SystemCallError
-        # Parent may have already cleaned up the session dir (e.g., parent
-        # exited first and rm_rf'd it), or disk is full. Silently skip —
-        # crashing in at_exit is worse than losing one child's profile.
       end
       @output = nil
       @format = nil
@@ -162,6 +167,18 @@ module Rperf
     ENV.delete("RPERF_ROOT_PROCESS")
     ENV.delete("RPERF_DEFER")
     @_session_dir_created = false
+    @_session_dir_output = false
+    # Restore ENV variables saved by _setup_inherit (inherit: true)
+    if @_saved_env
+      @_saved_env.each do |key, original|
+        if original.nil?
+          ENV.delete(key)
+        else
+          ENV[key] = original
+        end
+      end
+      @_saved_env = nil
+    end
     # Remove eagerly-created session dir if it's empty (no children ran)
     if session_dir && File.directory?(session_dir)
       begin
@@ -339,7 +356,8 @@ module Rperf
 
   # Saves profiling data to a file.
   # format: :json, :pprof, :collapsed, or :text. nil = auto-detect from path extension
-  #   .json.gz   → json (rperf native, default)
+  #   .json.gz   → json (rperf native, gzip compressed, default)
+  #   .json      → json (plain text, readable by jq etc.)
   #   .collapsed → collapsed stacks (FlameGraph / speedscope compatible)
   #   .txt       → text report (human/AI readable flat + cumulative table)
   #   .pb.gz     → pprof protobuf (gzip compressed)
@@ -357,19 +375,29 @@ module Rperf
     when :json
       require "json"
       json_data = data.merge(rperf_version: VERSION, pid: Process.pid, ppid: Process.ppid)
-      File.binwrite(path, gzip(JSON.generate(json_data)))
+      json_str = JSON.generate(json_data)
+      if path.to_s.end_with?(".gz")
+        File.binwrite(path, gzip(json_str))
+      else
+        File.write(path, json_str)
+      end
     else
       File.binwrite(path, gzip(PProf.encode(data)))
     end
   end
   private_class_method :write_data
 
-  # Load a profile saved by rperf record (.json.gz).
+  # Load a profile saved by rperf record (.json.gz or .json).
   # Returns the data hash (same format as Rperf.stop / Rperf.snapshot).
   # Warns to stderr if the file was saved by a different rperf version.
   def self.load(path)
-    compressed = File.binread(path)
-    raw = Zlib::GzipReader.new(StringIO.new(compressed)).read
+    raw_bytes = File.binread(path)
+    # Auto-detect gzip by magic bytes (1f 8b)
+    raw = if raw_bytes.byteslice(0, 2) == "\x1f\x8b".b
+      Zlib::GzipReader.new(StringIO.new(raw_bytes)).read
+    else
+      raw_bytes
+    end
     require "json"
     data = JSON.parse(raw, symbolize_names: true)
     saved_version = data.delete(:rperf_version)
@@ -716,6 +744,7 @@ module Rperf
   @_aggregate_output = nil
   @_aggregate_stat = false
   @_aggregate_format = nil
+  @_saved_env = nil  # saved ENV values for restore on stop (inherit: true)
 
   # Set up child process tracking from Rperf.start(inherit: ...).
   # Called only when NOT already inside a CLI-managed session (no RPERF_SESSION_DIR).
@@ -737,7 +766,11 @@ module Rperf
     _install_fork_hook
 
     if inherit == true
-      # inherit: true — also track spawned Ruby children via RUBYOPT
+      # inherit: true — also track spawned Ruby children via RUBYOPT.
+      # Save original values so _cleanup_session_state can restore them.
+      env_keys = %w[RPERF_ENABLED RPERF_FREQUENCY RPERF_MODE RPERF_SIGNAL RPERF_AGGREGATE RUBYLIB RUBYOPT]
+      @_saved_env = env_keys.to_h { |k| [k, ENV[k]] }
+
       ENV["RPERF_ENABLED"] = "1"
       ENV["RPERF_FREQUENCY"] = frequency.to_s
       ENV["RPERF_MODE"] = mode.to_s
@@ -852,6 +885,7 @@ module Rperf
     @output = File.join(session_dir, "profile-#{Process.pid}.json.gz")
     @format = :json
     @stat = false
+    @_session_dir_output = true
   end
 
   def self._restart_in_child
@@ -879,6 +913,7 @@ module Rperf
     opts[:defer] = true if ENV["RPERF_DEFER"] == "1"
 
     start(**opts, inherit: false)
+    @_session_dir_output = true
     label("%pid": Process.pid.to_s)
 
     # Register at_exit so child's profile is written even without explicit stop
@@ -1045,6 +1080,7 @@ module Rperf
 
         _install_fork_hook
         start(**_rperf_start_opts, inherit: false)
+        @_session_dir_output = true
         label("%pid": Process.pid.to_s)
         at_exit { stop }
       end

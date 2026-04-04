@@ -294,10 +294,18 @@ class TestRperfOutput < Test::Unit::TestCase
 
   def test_load_invalid_gzip
     Dir.mktmpdir do |dir|
+      # Data starting with gzip magic bytes (1f 8b) but not valid gzip
       path = File.join(dir, "bad.json.gz")
-      File.binwrite(path, "this is not gzip data")
+      File.binwrite(path, "\x1f\x8b this is not gzip data")
       assert_raise(Zlib::GzipFile::Error) do
         Rperf.load(path)
+      end
+
+      # Plain non-JSON text (not gzip) → treated as plain JSON → parse error
+      path2 = File.join(dir, "bad2.json.gz")
+      File.binwrite(path2, "this is not json")
+      assert_raise(JSON::ParserError) do
+        Rperf.load(path2)
       end
     end
   end

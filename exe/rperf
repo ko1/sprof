@@ -292,7 +292,7 @@ parser = OptionParser.new do |opts|
     end
   end
 
-  opts.on("--no-inherit", "Do not profile forked child processes (default: inherit)") do
+  opts.on("--no-inherit", "Do not profile forked/spawned child processes (default: inherit)") do
     inherit = false
   end
 
