@@ -24,6 +24,7 @@ POSIX systems (Linux, macOS). Requires Ruby >= 3.4.0.
                             (same as --format=text --output=/dev/stdout)
     --signal VALUE          Timer signal (Linux only): signal number, or 'false'
                             for nanosleep thread (default: auto)
+    --no-inherit            Do not profile forked/spawned child processes
     -v, --verbose           Print sampling statistics to stderr
 
 ### stat: Run command and print performance summary to stderr.
@@ -36,6 +37,7 @@ Uses wall mode by default. No file output by default.
     --report                Include flat/cumulative profile tables in output
     --signal VALUE          Timer signal (Linux only): signal number, or 'false'
                             for nanosleep thread (default: auto)
+    --no-inherit            Do not profile forked/spawned child processes
     -v, --verbose           Print additional sampling statistics
 
 Shows: user/sys/real time, time breakdown (CPU execution, GVL blocked,
@@ -43,6 +45,10 @@ GVL wait, GC marking, GC sweeping), GC/memory/OS stats, and profiler overhead.
 Lines are prefixed: `[Rperf]` for sampling-derived data, `[Ruby ]` for
 runtime info, `[OS   ]` for OS-level info.
 Use --report to add flat and cumulative top-50 function tables.
+
+When child processes are profiled (default), the stat output shows
+aggregated data from all processes and includes a "Ruby processes profiled"
+count. Use --no-inherit to disable child process tracking.
 
 ### exec: Run command and print full profile report to stderr.
 
@@ -53,6 +59,7 @@ Like `stat --report`. Uses wall mode by default. No file output by default.
     -m, --mode MODE         cpu or wall (default: wall)
     --signal VALUE          Timer signal (Linux only): signal number, or 'false'
                             for nanosleep thread (default: auto)
+    --no-inherit            Do not profile forked/spawned child processes
     -v, --verbose           Print additional sampling statistics
 
 Shows: user/sys/real time, time breakdown, GC/memory/OS stats, profiler overhead,
@@ -81,6 +88,44 @@ sites (e.g., GitHub Pages).
 
 Default (no flag): opens diff in browser.
 
+### Multi-process profiling
+
+By default, rperf profiles forked and spawned Ruby child processes.
+Profiles from all processes are merged into a single output. Each child
+process's samples are tagged with a `%pid` label for per-process filtering.
+
+    # Profile a preforking server (Unicorn, Puma, etc.)
+    rperf stat -m wall bundle exec unicorn
+    rperf record -m wall -o profile.json.gz bundle exec unicorn
+
+    # Profile with fork
+    rperf stat ruby -e '4.times { fork { work } }; Process.waitall'
+
+    # Disable child process tracking
+    rperf stat --no-inherit ruby app.rb
+
+How it works:
+
+- On fork: `Process._fork` hook restarts profiling in the child and sets
+  a `%pid` label. When the child exits, its profile is saved to a
+  temporary session directory.
+- On spawn/system: The spawned Ruby process inherits `RUBYOPT=-rrperf`
+  and `RPERF_SESSION_DIR`. It auto-starts profiling and writes its
+  profile to the session directory.
+- When the root process exits, it aggregates all profiles from the
+  session directory into a single output (stat report or file).
+- The session directory is cleaned up after aggregation.
+
+Limitations:
+
+- Daemon children (Process.daemon) that outlive the parent will have
+  their profiles lost, since the parent aggregates and cleans up the
+  session directory at exit.
+- Cross-process snapshots (Rperf.snapshot) are not supported; snapshots
+  only cover the current process.
+- Only Ruby child processes are profiled; non-Ruby children (shell
+  scripts, Python, etc.) are not affected.
+
 ### Examples
 
     rperf record ruby app.rb
@@ -92,6 +137,8 @@ Default (no flag): opens diff in browser.
     rperf stat ruby app.rb
     rperf stat --report ruby app.rb
     rperf stat -o profile.pb.gz ruby app.rb
+    rperf stat -m wall bundle exec unicorn
+    rperf stat --no-inherit ruby app.rb
     rperf exec ruby app.rb
     rperf exec -m cpu ruby app.rb
     rperf report

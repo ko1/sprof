@@ -79,15 +79,40 @@ Frame VALUEs must be protected from garbage collection. rperf wraps the profiler
 
 The frame table keys array starts at 4,096 entries and grows by 2× when full. Growth allocates a new array, copies existing data, and swaps the pointer atomically (`memory_order_release`). The old array is kept alive until `stop` to prevent use-after-free if GC's mark phase is reading it concurrently. The `dmark` function loads the keys pointer with `memory_order_acquire` and the count with `memory_order_acquire` to ensure a consistent view.
 
-## Fork safety
+## Fork safety and multi-process profiling
+
+### Fork safety (C level)
 
 rperf registers a `pthread_atfork` child handler that silently stops profiling in the forked child process ([fork safety](#index:fork safety)):
 
 - Clears the timer/signal state
-- Removes event hooks
+- Re-initializes mutex/condvar (may have been locked by parent's worker thread at fork time)
+- Removes event hooks (thread events, GC events)
 - Frees sample buffers, frame table, and aggregation table
+- Resets GC state, stats, and profile refcount
 
 The parent process continues profiling unaffected. The child can start a fresh profiling session if needed.
+
+### Multi-process profiling (Ruby level)
+
+When [multi-process profiling](#index:multi-process profiling) is enabled (the default for CLI usage), rperf uses Ruby's `Process._fork` hook (available since Ruby 3.1) to automatically restart profiling in forked child processes. The flow is:
+
+1. **Before fork**: The `_fork` hook creates a [session directory](#index:session directory) (once, on first fork) for collecting per-process profiles. The root process's output is redirected to the session directory.
+2. **In child**: After `pthread_atfork` cleans up C state, `_restart_in_child` starts a new profiling session with output directed to the session directory. A `%pid` label is set for per-process identification.
+3. **On child exit**: The inherited `at_exit` hook calls `Rperf.stop`, writing the child's profile to the session directory as a `.json.gz` file.
+4. **On root exit**: The root writes its own profile, then aggregates all `.json.gz` files in the session directory into a single merged output (stat report or file). The session directory is then deleted.
+
+For spawned children (`spawn`, `system`), the child inherits `RUBYOPT=-rrperf` and environment variables (`RPERF_SESSION_DIR`, `RPERF_ROOT_PROCESS`). When the child Ruby process loads rperf, the auto-start block detects it is not the root process and writes its profile directly to the session directory.
+
+### Session directory
+
+The session directory is created under `$RPERF_TMPDIR`, `$XDG_RUNTIME_DIR`, or the system temp directory (in that priority order), inside a per-user subdirectory (`rperf-$UID/`, mode 0700). Each session gets a unique directory name: `rperf-$PID-$RANDOM`.
+
+Stale session directories from crashed processes are cleaned up automatically: when a new CLI session starts, it checks for session directories whose root PID is no longer alive and removes them.
+
+### Label merging
+
+When aggregating profiles from multiple processes, [label sets](#index:label set) are remapped to ensure consistency. If two child processes use the same label values (e.g., both have `endpoint: "GET /users"`), they share the same label set ID in the merged output. The `%pid` label ensures samples from different processes remain distinguishable even after merging.
 
 ## Known limitations
 

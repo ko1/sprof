@@ -27,6 +27,12 @@ rperf record -o profile.txt ruby my_app.rb
 # collapsed stacks で記録
 rperf record -o profile.collapsed ruby my_app.rb
 
+# プリフォーキングサーバーの全ワーカーをプロファイル
+rperf stat -m wall bundle exec unicorn
+
+# 子プロセストラッキングを無効化
+rperf stat --no-inherit ruby my_app.rb
+
 # rperf ビューアでプロファイルを表示
 rperf report
 
@@ -115,6 +121,9 @@ end
 | `RPERF_STAT_COMMAND` | string | stat 出力ヘッダーに表示するコマンド文字列 |
 | `RPERF_AGGREGATE` | `0` | サンプル集約を無効化（生サンプルを返す） |
 | `RPERF_SIGNAL` | integer または `false` | タイマーシグナル (Linux のみ): シグナル番号、または `false` で nanosleep スレッド |
+| `RPERF_ROOT_PROCESS` | PID 文字列 | マルチプロセスセッションのルートプロセス PID (CLI が設定) |
+| `RPERF_SESSION_DIR` | パス | マルチプロセスプロファイル収集用セッションディレクトリ (CLI が設定) |
+| `RPERF_TMPDIR` | パス | セッションディレクトリのベースディレクトリを上書き (デフォルト: `$XDG_RUNTIME_DIR` またはシステム tmpdir) |
 
 ## プロファイリングモードの比較
 
@@ -144,5 +153,6 @@ end
 | `%GVL=wait` | wall | スレッドが GVL 待ち（競合） |
 | `%GC=mark` | 両方 | GC marking フェーズ（wall time） |
 | `%GC=sweep` | 両方 | GC sweeping フェーズ（wall time） |
+| `%pid` | PID 文字列 | 両方 | 子プロセスのプロセス ID（マルチプロセスモードのみ） |
 
-これらはサンプルのラベルとして `label_sets` に格納されます。pprof で `-tagfocus=%GVL=blocked` のようにフィルタリングできます。
+これらはサンプルのラベルとして `label_sets` に格納されます。pprof で `-tagfocus=%GVL=blocked`、`-tagfocus=%pid=1234` のようにフィルタリングできます。

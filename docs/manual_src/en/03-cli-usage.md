@@ -98,6 +98,7 @@ rperf stat [options] command [args...]
 | `--report` | Include flat/cumulative profile tables in output |
 | `--signal VALUE` | Timer signal (Linux only): signal number, or `false` for nanosleep thread |
 | `--no-aggregate` | Disable sample aggregation (keep raw samples) |
+| `--no-inherit` | Do not profile forked/spawned child processes (default: inherit) |
 | `-v` | Print additional sampling statistics |
 
 ## rperf exec
@@ -123,6 +124,7 @@ rperf exec [options] command [args...]
 | `-m MODE` | `cpu` or `wall` (default: `wall`) |
 | `--signal VALUE` | Timer signal (Linux only): signal number, or `false` for nanosleep thread |
 | `--no-aggregate` | Disable sample aggregation (keep raw samples) |
+| `--no-inherit` | Do not profile forked/spawned child processes (default: inherit) |
 | `-v` | Print additional sampling statistics |
 
 ## rperf record
@@ -265,6 +267,7 @@ rperf record [options] command [args...]
 | `-p, --print` | Print text profile to stdout (same as `--format=text --output=/dev/stdout`) |
 | `--signal VALUE` | Timer signal (Linux only): signal number, or `false` for nanosleep thread |
 | `--no-aggregate` | Disable sample aggregation (keep raw samples) |
+| `--no-inherit` | Do not profile forked/spawned child processes (default: inherit) |
 | `-v` | Print sampling statistics to stderr |
 
 ## rperf report
@@ -352,6 +355,64 @@ rperf record -o after.pb.gz ruby my_app.rb
 # Compare
 rperf diff before.pb.gz after.pb.gz
 ```
+
+## Multi-process profiling
+
+By default, all CLI subcommands (`stat`, `exec`, `record`) automatically profile [forked](#index:fork) and spawned Ruby child processes. Profiles from all processes are merged into a single output — the stat report shows aggregated data, and `record` produces a single merged file.
+
+This is particularly useful for [preforking servers](#index:preforking server) like Unicorn and Puma, where the master process forks worker processes:
+
+```bash
+# Profile a Unicorn server with all its workers
+rperf stat -m wall bundle exec unicorn -c config.rb
+
+# Record a merged profile from a Puma server
+rperf record -m wall -o profile.json.gz bundle exec puma
+```
+
+### How it works
+
+When child process tracking is enabled (the default), rperf:
+
+1. Sets up a session directory for collecting per-process profiles
+2. Installs a `Process._fork` hook that restarts profiling in forked children
+3. Spawned Ruby children (via `spawn`, `system`, backticks) inherit `RUBYOPT=-rrperf` and auto-start profiling
+4. Each child writes its profile to the session directory on exit
+5. The root process aggregates all profiles and produces the final output
+
+Each child process's samples are tagged with a [`%pid`](#index:%pid label) label containing the process ID. This allows per-process filtering in the viewer (tagfocus by PID) or in pprof (`-tagfocus=%pid=1234`).
+
+### Disabling child tracking
+
+Use `--no-inherit` to profile only the root process:
+
+```bash
+rperf stat --no-inherit ruby my_app.rb
+```
+
+### Example: Fork with distinct work
+
+```bash
+rperf stat ruby -e '
+  def parent_work = 10_000_000.times { 1 + 1 }
+  def child_work  = 10_000_000.times { 1 + 1 }
+  fork { child_work }
+  Process.waitall
+  parent_work
+'
+```
+
+The stat output shows aggregated data from both processes, with a "Ruby processes profiled" count:
+
+```
+               2            [Rperf] Ruby processes profiled
+```
+
+### Limitations
+
+- **Daemon children**: Processes that call `Process.daemon` and outlive the parent will have their profiles lost — the parent aggregates and cleans up the session directory at exit.
+- **Cross-process snapshots**: `Rperf.snapshot` only covers the current process. There is no way to snapshot all children simultaneously.
+- **Non-Ruby children**: Only Ruby child processes are profiled. Shell scripts, Python processes, etc. are not affected by rperf.
 
 ## rperf help
 

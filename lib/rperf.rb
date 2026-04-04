@@ -274,7 +274,8 @@ module Rperf
       File.write(path, Text.encode(data))
     when :json
       require "json"
-      File.binwrite(path, gzip(JSON.generate(data.merge(rperf_version: VERSION))))
+      json_data = data.merge(rperf_version: VERSION, pid: Process.pid, ppid: Process.ppid)
+      File.binwrite(path, gzip(JSON.generate(json_data)))
     else
       File.binwrite(path, gzip(PProf.encode(data)))
     end
@@ -479,6 +480,8 @@ module Rperf
                                   format_integer(gc[:major_gc_count])])
     $stderr.puts STAT_LINE.call(format_integer(gc[:total_allocated_objects]), "  ", "[Ruby ] allocated objects")
     $stderr.puts STAT_LINE.call(format_integer(gc[:total_freed_objects]), "  ", "[Ruby ] freed objects")
+    process_count = data[:process_count] || 0
+    $stderr.puts STAT_LINE.call(format_integer(process_count), "  ", "[Rperf] Ruby processes profiled") if process_count > 1
     thread_count = data[:detected_thread_count] || 0
     $stderr.puts STAT_LINE.call(format_integer(thread_count), "  ", "[Ruby ] detected threads") if thread_count > 0
     if defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?
@@ -604,6 +607,166 @@ module Rperf
   end
   private_class_method :get_system_stats
 
+  # --- Multi-process (fork) support ---
+
+  @_aggregate_output = nil
+  @_aggregate_stat = false
+  @_aggregate_format = nil
+
+  def self._parse_signal_env
+    case ENV["RPERF_SIGNAL"]
+    when nil then nil
+    when "false" then false
+    when /\A\d+\z/ then ENV["RPERF_SIGNAL"].to_i
+    end
+  end
+  private_class_method :_parse_signal_env
+
+  @_fork_hook_installed = false
+
+  @_session_dir_created = false
+
+  def self._install_fork_hook
+    return if @_fork_hook_installed
+    @_fork_hook_installed = true
+
+    ::Process.singleton_class.prepend(Module.new {
+      def _fork
+        if !Rperf.instance_variable_get(:@_session_dir_created) &&
+           Process.pid.to_s == ENV["RPERF_ROOT_PROCESS"]
+          Rperf._on_first_fork
+        end
+        pid = super
+        if pid == 0
+          Rperf._restart_in_child
+        end
+        pid
+      end
+    })
+  end
+  private_class_method :_install_fork_hook
+
+  def self._on_first_fork
+    return if @_session_dir_created
+    session_dir = ENV["RPERF_SESSION_DIR"]
+    return unless session_dir
+
+    # Create session dir on first fork
+    require "fileutils"
+    user_dir = File.dirname(session_dir)
+    begin
+      Dir.mkdir(user_dir, 0700) unless File.directory?(user_dir)
+    rescue Errno::EEXIST
+      # race — fine
+    rescue SystemCallError
+      return  # can't create dir — fall back to single-process mode
+    end
+    begin
+      Dir.mkdir(session_dir, 0700)
+    rescue SystemCallError
+      return
+    end
+    @_session_dir_created = true
+
+    # Switch root's output to session dir (stat timing is already saved by start())
+    @output = File.join(session_dir, "profile-#{Process.pid}.json.gz")
+    @format = :json
+    @stat = false
+  end
+
+  def self._restart_in_child
+    session_dir = ENV["RPERF_SESSION_DIR"]
+    return unless session_dir
+    return if _c_running?  # should not happen, but guard against it
+
+    # C state is already cleaned up by pthread_atfork child handler.
+    @label_set_table = nil
+    @label_set_index = nil
+
+    child_output = File.join(session_dir, "profile-#{Process.pid}.json.gz")
+
+    opts = {
+      frequency: (ENV["RPERF_FREQUENCY"] || 1000).to_i,
+      mode: ENV["RPERF_MODE"] == "cpu" ? :cpu : :wall,
+      aggregate: ENV["RPERF_AGGREGATE"] != "0",
+      output: child_output,
+      format: :json,
+      stat: false,
+      verbose: false,
+    }
+    sig = _parse_signal_env
+    opts[:signal] = sig unless sig.nil?
+
+    start(**opts)
+    label("%pid": Process.pid.to_s)
+  end
+
+  def self._aggregate_and_report
+    session_dir = ENV["RPERF_SESSION_DIR"]
+    return unless session_dir && File.directory?(session_dir)
+
+    merged_samples = []
+    merged_label_sets = [{}]
+    total_trigger_count = 0
+    total_sampling_count = 0
+    total_sampling_time_ns = 0
+    process_count = 0
+
+    Dir.glob(File.join(session_dir, "profile-*.json.gz")).each do |file|
+      data = load(file)
+      next unless data
+      _merge_into(merged_samples, merged_label_sets, data)
+      total_trigger_count += (data[:trigger_count] || 0)
+      total_sampling_count += (data[:sampling_count] || 0)
+      total_sampling_time_ns += (data[:sampling_time_ns] || 0)
+      process_count += 1
+    end
+
+    return if process_count == 0
+
+    merged_data = {
+      mode: (ENV["RPERF_MODE"] || "wall").to_sym,
+      frequency: (ENV["RPERF_FREQUENCY"] || 1000).to_i,
+      aggregated_samples: merged_samples,
+      label_sets: merged_label_sets,
+      trigger_count: total_trigger_count,
+      sampling_count: total_sampling_count,
+      sampling_time_ns: total_sampling_time_ns,
+      process_count: process_count,
+    }
+
+    print_stat(merged_data) if @_aggregate_stat
+    if @_aggregate_output
+      write_data(@_aggregate_output, merged_data, @_aggregate_format)
+    end
+
+    require "fileutils"
+    FileUtils.rm_rf(session_dir)
+  rescue => e
+    $stderr.puts "rperf: warning: failed to aggregate multi-process data: #{e.message}"
+  end
+  # Not private — called from at_exit block which runs in top-level context
+
+  def self._merge_into(merged_samples, merged_label_sets, data)
+    child_label_sets = data[:label_sets] || [{}]
+    id_map = {}
+    child_label_sets.each_with_index do |ls, child_id|
+      existing = merged_label_sets.index(ls)
+      if existing
+        id_map[child_id] = existing
+      else
+        id_map[child_id] = merged_label_sets.size
+        merged_label_sets << ls
+      end
+    end
+
+    (data[:aggregated_samples] || []).each do |frames, weight, thread_seq, label_set_id|
+      new_lsi = id_map[label_set_id || 0] || 0
+      merged_samples << [frames, weight, thread_seq, new_lsi]
+    end
+  end
+  private_class_method :_merge_into
+
   # ENV-based auto-start for CLI usage
   if ENV["RPERF_ENABLED"] == "1"
     _rperf_mode_str = ENV["RPERF_MODE"] || "cpu"
@@ -618,22 +781,76 @@ module Rperf
                       ENV["RPERF_FORMAT"].to_sym
                     end
     _rperf_stat = ENV["RPERF_STAT"] == "1"
-    _rperf_signal = case ENV["RPERF_SIGNAL"]
-                    when nil then nil
-                    when "false" then false
-                    when /\A\d+\z/ then ENV["RPERF_SIGNAL"].to_i
-                    else raise ArgumentError, "RPERF_SIGNAL must be a signal number or 'false', got: #{ENV["RPERF_SIGNAL"].inspect}"
-                    end
+    _rperf_signal = _parse_signal_env
     _rperf_aggregate = ENV["RPERF_AGGREGATE"] != "0"
+    _rperf_original_output = _rperf_stat ? ENV["RPERF_OUTPUT"] : (ENV["RPERF_OUTPUT"] || "rperf.json.gz")
+
     _rperf_start_opts = { frequency: (ENV["RPERF_FREQUENCY"] || 1000).to_i, mode: _rperf_mode,
-                          output: _rperf_stat ? ENV["RPERF_OUTPUT"] : (ENV["RPERF_OUTPUT"] || "rperf.json.gz"),
                           verbose: ENV["RPERF_VERBOSE"] == "1",
-                          format: _rperf_format,
-                          stat: _rperf_stat,
                           aggregate: _rperf_aggregate }
     _rperf_start_opts[:signal] = _rperf_signal unless _rperf_signal.nil?
-    start(**_rperf_start_opts)
-    at_exit { stop }
+
+    if ENV["RPERF_SESSION_DIR"] && Process.pid.to_s != ENV["RPERF_ROOT_PROCESS"]
+      # spawn / fork+exec child: write to session dir, no aggregation.
+      _rperf_session_dir = ENV["RPERF_SESSION_DIR"]
+      unless File.directory?(_rperf_session_dir)
+        require "fileutils"
+        FileUtils.mkdir_p(_rperf_session_dir, mode: 0700)
+      end
+
+      _rperf_start_opts[:output] = File.join(_rperf_session_dir, "profile-#{Process.pid}.json.gz")
+      _rperf_start_opts[:format] = :json
+      _rperf_start_opts[:stat] = false
+      _rperf_start_opts[:verbose] = false
+
+      _install_fork_hook
+      start(**_rperf_start_opts)
+      label("%pid": Process.pid.to_s)
+      at_exit { stop }
+    elsif ENV["RPERF_SESSION_DIR"]
+      # Root process: save original output settings for aggregation on fork.
+      # Start with normal output — session dir is created lazily on first fork.
+      # If no fork happens, behaves exactly like single-process mode.
+      @_aggregate_output = _rperf_original_output
+      @_aggregate_stat = _rperf_stat
+      @_aggregate_format = _rperf_format
+
+      _rperf_start_opts[:output] = _rperf_original_output
+      _rperf_start_opts[:format] = _rperf_format
+      _rperf_start_opts[:stat] = _rperf_stat
+
+      _install_fork_hook
+      start(**_rperf_start_opts)
+
+      at_exit {
+        session_dir = ENV["RPERF_SESSION_DIR"].to_s
+        has_children = Process.pid.to_s == ENV["RPERF_ROOT_PROCESS"] &&
+                       File.directory?(session_dir)
+
+        if has_children && !Rperf.instance_variable_get(:@_session_dir_created)
+          # spawn case: _on_first_fork didn't fire. Suppress individual output
+          # so aggregation handles everything.
+          Rperf.instance_variable_set(:@stat, false)
+          Rperf.instance_variable_set(:@output, nil)
+        end
+
+        data = Rperf.stop
+
+        if has_children
+          # Write root's profile to session dir if not already there (spawn case)
+          if data && !Rperf.instance_variable_get(:@_session_dir_created)
+            Rperf.save(File.join(session_dir, "profile-#{Process.pid}.json.gz"), data, format: :json)
+          end
+          Rperf._aggregate_and_report
+        end
+      }
+    else
+      _rperf_start_opts[:output] = _rperf_original_output
+      _rperf_start_opts[:format] = _rperf_format
+      _rperf_start_opts[:stat] = _rperf_stat
+      start(**_rperf_start_opts)
+      at_exit { stop }
+    end
   end
 
   # Text report encoder — human/AI readable flat + cumulative top-N table.

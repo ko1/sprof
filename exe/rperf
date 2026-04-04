@@ -1,6 +1,7 @@
 #!/usr/bin/env ruby
 require "optparse"
 require "socket"
+require "fileutils"
 
 def find_available_port
   server = TCPServer.new("localhost", 0)
@@ -234,6 +235,7 @@ signal = nil
 verbose = false
 aggregate = true
 stat_report = (subcommand == "exec")
+inherit = true
 
 parser = OptionParser.new do |opts|
   opts.banner = case subcommand
@@ -286,6 +288,10 @@ parser = OptionParser.new do |opts|
     opts.on("--report", "Include flat/cumulative profile tables in output") do
       stat_report = true
     end
+  end
+
+  opts.on("--no-inherit", "Do not profile forked child processes (default: inherit)") do
+    inherit = false
   end
 
   opts.on("-v", "--verbose", "Print sampling statistics to stderr") do
@@ -354,6 +360,44 @@ if subcommand == "stat" || subcommand == "exec"
   ENV["RPERF_STAT"] = "1"
   ENV["RPERF_STAT_COMMAND"] = ARGV.join(" ")
   ENV["RPERF_STAT_REPORT"] = "1" if stat_report
+end
+
+# Multi-process (fork) support: create a session directory for aggregation
+if inherit
+  require "securerandom"
+  require "tmpdir"
+
+  # Compute session dir path (directory is created lazily on first fork)
+  bases = [ENV["RPERF_TMPDIR"], ENV["XDG_RUNTIME_DIR"], Dir.tmpdir].compact
+  user_dir = nil
+
+  bases.each do |base|
+    candidate = File.join(base, "rperf-#{Process.uid}")
+    if File.directory?(candidate) || File.writable?(base)
+      user_dir = candidate
+      break
+    end
+  end
+
+  if user_dir
+    # Clean up stale session dirs from crashed processes
+    if File.directory?(user_dir)
+      Dir.glob(File.join(user_dir, "rperf-*")).each do |dir|
+        m = File.basename(dir).match(/\Arperf-(\d+)-/)
+        next unless m
+        pid = m[1].to_i
+        begin
+          Process.kill(0, pid) # alive → skip
+        rescue Errno::ESRCH   # dead → cleanup
+          FileUtils.rm_rf(dir)
+        rescue Errno::EPERM   # not ours → skip
+        end
+      end
+    end
+
+    ENV["RPERF_ROOT_PROCESS"] = Process.pid.to_s
+    ENV["RPERF_SESSION_DIR"] = File.join(user_dir, "rperf-#{Process.pid}-#{SecureRandom.hex(4)}")
+  end
 end
 
 exec(*ARGV)

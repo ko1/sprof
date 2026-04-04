@@ -98,6 +98,7 @@ rperf stat [options] command [args...]
 | `--report` | フラット/キュムレイティブなプロファイルテーブルを出力に含める |
 | `--signal VALUE` | タイマーシグナル (Linux のみ): シグナル番号、または `false` で nanosleep スレッド |
 | `--no-aggregate` | サンプル集約を無効化（生サンプルを保持） |
+| `--no-inherit` | fork/spawn した子プロセスをプロファイルしない (デフォルト: inherit) |
 | `-v` | 追加のサンプリング統計を出力 |
 
 ## rperf exec
@@ -123,6 +124,7 @@ rperf exec [options] command [args...]
 | `-m MODE` | `cpu` または `wall` (デフォルト: `wall`) |
 | `--signal VALUE` | タイマーシグナル (Linux のみ): シグナル番号、または `false` で nanosleep スレッド |
 | `--no-aggregate` | サンプル集約を無効化（生サンプルを保持） |
+| `--no-inherit` | fork/spawn した子プロセスをプロファイルしない (デフォルト: inherit) |
 | `-v` | 追加のサンプリング統計を出力 |
 
 ## rperf record
@@ -349,6 +351,64 @@ rperf record -o after.pb.gz ruby my_app.rb
 # 比較
 rperf diff before.pb.gz after.pb.gz
 ```
+
+## マルチプロセス プロファイリング
+
+デフォルトで、すべての CLI サブコマンド（`stat`、`exec`、`record`）は fork や spawn された Ruby 子プロセスも自動的にプロファイルします。全プロセスのプロファイルが 1 つの出力にマージされます。stat レポートには集約データが表示され、`record` は単一のマージ済みファイルを生成します。
+
+これは Unicorn や Puma のような[プリフォーキングサーバー](#index:preforking server)で特に有用です:
+
+```bash
+# Unicorn サーバーの全ワーカーをプロファイル
+rperf stat -m wall bundle exec unicorn -c config.rb
+
+# Puma サーバーのマージ済みプロファイルを記録
+rperf record -m wall -o profile.json.gz bundle exec puma
+```
+
+### 仕組み
+
+子プロセストラッキングが有効な場合（デフォルト）、rperf は:
+
+1. プロセスごとのプロファイルを収集するためのセッションディレクトリを設定
+2. fork された子プロセスでプロファイリングを再開する `Process._fork` フックをインストール
+3. spawn された Ruby 子プロセス（`spawn`、`system`、バッククォート経由）は `RUBYOPT=-rrperf` を継承して自動的にプロファイリングを開始
+4. 各子プロセスが終了時にプロファイルをセッションディレクトリに書き込み
+5. ルートプロセスが全プロファイルを集約して最終出力を生成
+
+各子プロセスのサンプルにはプロセス ID を含む [`%pid`](#index:%pid label) ラベルが付与されます。ビューアーで PID によるフィルタリング（tagfocus）や pprof での `-tagfocus=%pid=1234` が可能です。
+
+### 子プロセストラッキングの無効化
+
+`--no-inherit` でルートプロセスのみをプロファイルします:
+
+```bash
+rperf stat --no-inherit ruby my_app.rb
+```
+
+### 例: fork で異なる処理を実行
+
+```bash
+rperf stat ruby -e '
+  def parent_work = 10_000_000.times { 1 + 1 }
+  def child_work  = 10_000_000.times { 1 + 1 }
+  fork { child_work }
+  Process.waitall
+  parent_work
+'
+```
+
+stat 出力には両プロセスの集約データが表示され、「Ruby processes profiled」のカウントが含まれます:
+
+```
+               2            [Rperf] Ruby processes profiled
+```
+
+### 制限事項
+
+- **デーモン化した子プロセス**: `Process.daemon` を呼び出して親より長く生きるプロセスのプロファイルは失われます。親が終了時にセッションディレクトリを集約・削除するためです。
+- **クロスプロセス スナップショット**: `Rperf.snapshot` は現在のプロセスのみを対象とします。全子プロセスを同時にスナップショットする方法はありません。
+- **非 Ruby 子プロセス**: Ruby 子プロセスのみがプロファイルされます。シェルスクリプトや Python プロセスなどは影響を受けません。
 
 ## rperf help
 

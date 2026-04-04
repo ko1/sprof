@@ -27,6 +27,12 @@ rperf record -o profile.txt ruby my_app.rb
 # Record to collapsed stacks
 rperf record -o profile.collapsed ruby my_app.rb
 
+# Profile a preforking server (all workers)
+rperf stat -m wall bundle exec unicorn
+
+# Disable child process tracking
+rperf stat --no-inherit ruby my_app.rb
+
 # View profile in rperf viewer
 rperf report
 
@@ -115,6 +121,9 @@ These are used internally by the CLI to configure the auto-started profiler:
 | `RPERF_STAT_COMMAND` | string | Command string shown in stat output header |
 | `RPERF_AGGREGATE` | `0` | Disable sample aggregation (return raw samples) |
 | `RPERF_SIGNAL` | integer or `false` | Timer signal (Linux only): signal number, or `false` for nanosleep thread |
+| `RPERF_ROOT_PROCESS` | PID string | Root process PID for multi-process session (set by CLI) |
+| `RPERF_SESSION_DIR` | path | Session directory for multi-process profile collection (set by CLI) |
+| `RPERF_TMPDIR` | path | Override base directory for session directories (default: `$XDG_RUNTIME_DIR` or system tmpdir) |
 
 ## Profiling mode comparison
 
@@ -144,5 +153,6 @@ These are used internally by the CLI to configure the auto-started profiler:
 | `%GVL` | `wait` | wall | Thread waiting for GVL (contention) |
 | `%GC` | `mark` | both | GC marking phase (wall time) |
 | `%GC` | `sweep` | both | GC sweeping phase (wall time) |
+| `%pid` | PID string | both | Child process ID (multi-process mode only) |
 
-These labels are attached to samples alongside user labels. In pprof output, filter with `-tagfocus=%GVL=blocked`, `-tagroot=%GC`, etc.
+These labels are attached to samples alongside user labels. In pprof output, filter with `-tagfocus=%GVL=blocked`, `-tagroot=%GC`, `-tagfocus=%pid=1234`, etc.
