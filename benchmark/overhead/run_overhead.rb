@@ -7,10 +7,10 @@
 
 ITERATIONS = Integer(ENV.fetch("ITERATIONS", "10"))
 FREQUENCY = 1000
-SCRIPT = File.join(__dir__, "scripts", "ratio_1.rb")
-OUTPUT_DIR = File.join(__dir__, "data")
+SCRIPT = File.join(__dir__, "..", "accuracy", "scripts", "ratio_1.rb")
+OUTPUT_DIR = File.join(__dir__, "..", "data")
 RAW_FILE = File.join(OUTPUT_DIR, "overhead_raw.tsv")
-TMP_OUT = File.join(__dir__, "tmp", "overhead_out")
+TMP_OUT = File.join(__dir__, "..", "tmp", "overhead_out")
 
 CONFIGS = [
   { profiler: "none",     mode: "wall" },
@@ -26,7 +26,7 @@ CONFIGS = [
 Dir.mkdir(OUTPUT_DIR) unless Dir.exist?(OUTPUT_DIR)
 Dir.mkdir(File.dirname(TMP_OUT)) unless Dir.exist?(File.dirname(TMP_OUT))
 
-profrun = File.join(__dir__, "profrun.rb")
+profrun = File.join(__dir__, "..", "accuracy", "profrun.rb")
 
 File.open(RAW_FILE, "w") do |f|
   f.puts "profiler\tmode\titeration\telapsed_ms\tsampling_count\tsampling_time_ns"

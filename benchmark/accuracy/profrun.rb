@@ -35,8 +35,8 @@ abort "#{parser.help}\nError: SCRIPT argument is required" unless script
 abort "Script not found: #{script}" unless File.exist?(script)
 
 # Setup load path
+$LOAD_PATH.unshift(File.join(__dir__, "..", "..", "lib"))
 $LOAD_PATH.unshift(File.join(__dir__, "..", "lib"))
-$LOAD_PATH.unshift(File.join(__dir__, "lib"))
 
 # Require workload methods
 require "rperf_workload_methods"

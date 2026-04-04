@@ -9,7 +9,7 @@ require "csv"
 require "open3"
 require "etc"
 
-OUTPUT_DIR = File.join(__dir__, "data")
+OUTPUT_DIR = File.join(__dir__, "..", "data")
 RAW_FILE = File.join(OUTPUT_DIR, "accuracy_raw.csv")
 SUMMARY_FILE = File.join(OUTPUT_DIR, "accuracy_summary.csv")
 CHECK_ACCURACY = File.join(__dir__, "check_accuracy.rb")
