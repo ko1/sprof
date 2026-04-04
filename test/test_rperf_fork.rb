@@ -353,9 +353,12 @@ class TestRperfMultiProcess < Test::Unit::TestCase
 
       old_stderr = $stderr
       $stderr = StringIO.new
-      data = Rperf.stop
-      warning = $stderr.string
-      $stderr = old_stderr
+      begin
+        data = Rperf.stop
+        warning = $stderr.string
+      ensure
+        $stderr = old_stderr
+      end
 
       assert_not_nil data, "stop should return root data as fallback"
       assert_include warning, "aggregation failed",

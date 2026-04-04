@@ -177,6 +177,9 @@ module Rperf
     ENV.delete("RPERF_DEFER")
     @_session_dir_created = false
     @_session_dir_output = false
+    @_aggregate_output = nil
+    @_aggregate_stat = false
+    @_aggregate_format = nil
     # Restore ENV variables saved by _setup_inherit (inherit: true)
     if @_saved_env
       @_saved_env.each do |key, original|
