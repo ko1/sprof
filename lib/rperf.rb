@@ -500,7 +500,7 @@ module Rperf
 
     if samples_raw.size > 0
       breakdown, total_weight = compute_stat_breakdown(samples_raw, data[:label_sets])
-      print_stat_breakdown(breakdown, total_weight)
+      print_stat_breakdown(breakdown, total_weight, data)
       print_stat_runtime_info(data)
       print_stat_system_info(data)
       print_stat_report(data) if ENV["RPERF_STAT_REPORT"] == "1"
@@ -536,8 +536,12 @@ module Rperf
   end
   private_class_method :compute_stat_breakdown
 
-  def self.print_stat_breakdown(breakdown, total_weight)
+  def self.print_stat_breakdown(breakdown, total_weight, data)
     $stderr.puts
+    process_count = data[:process_count] || 0
+    if process_count > 1
+      $stderr.puts STAT_LINE.call(format_integer(process_count), "  ", "[Rperf] Ruby processes profiled")
+    end
 
     [
       [:cpu_execution, "[Rperf] CPU execution"],
@@ -563,8 +567,6 @@ module Rperf
                                   format_integer(gc[:major_gc_count])])
     $stderr.puts STAT_LINE.call(format_integer(gc[:total_allocated_objects]), "  ", "[Ruby ] allocated objects")
     $stderr.puts STAT_LINE.call(format_integer(gc[:total_freed_objects]), "  ", "[Ruby ] freed objects")
-    process_count = data[:process_count] || 0
-    $stderr.puts STAT_LINE.call(format_integer(process_count), "  ", "[Rperf] Ruby processes profiled") if process_count > 1
     thread_count = data[:detected_thread_count] || 0
     $stderr.puts STAT_LINE.call(format_integer(thread_count), "  ", "[Ruby ] detected threads") if thread_count > 0
     if defined?(RubyVM::YJIT) && RubyVM::YJIT.enabled?
