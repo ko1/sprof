@@ -117,9 +117,9 @@ How it works:
 - On fork: `Process._fork` hook restarts profiling in the child and sets
   a `%pid` label. When the child exits, its profile is saved to a
   temporary session directory.
-- On spawn/system: The spawned Ruby process inherits `RUBYOPT=-rrperf`
-  and `RPERF_SESSION_DIR`. It auto-starts profiling and writes its
-  profile to the session directory.
+- On spawn/system: The spawned Ruby process inherits `RUBYLIB` (pointing
+  to rperf's lib directory) and `RUBYOPT=-rrperf`, plus `RPERF_SESSION_DIR`.
+  It auto-starts profiling and writes its profile to the session directory.
 - When the root process exits, it aggregates all profiles from the
   session directory into a single output (stat report or file).
 - The session directory is cleaned up after aggregation.

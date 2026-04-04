@@ -79,7 +79,7 @@ data = Rperf.stop
 | `signal:` | Integer/Boolean | `nil` | Linux only: `nil` = timer signal (default), `false` = nanosleep thread, positive integer = specific RT signal number |
 | `aggregate:` | Boolean | `true` | Aggregate identical stacks during profiling to reduce memory. `false` returns raw per-sample data |
 | `defer:` | Boolean | `false` | Start with timer paused. Use [`Rperf.profile`](#index:Rperf.profile) blocks to activate sampling for specific sections |
-| `inherit:` | `:fork`, `true`, or `false` | `:fork` | Controls child process tracking. `:fork` tracks forked children via `Process._fork` hook. `true` also tracks spawned Ruby children (sets `RUBYOPT=-rrperf`). `false` disables child tracking |
+| `inherit:` | `:fork`, `true`, or `false` | `:fork` | Controls child process tracking. `:fork` tracks forked children via `Process._fork` hook. `true` also tracks spawned Ruby children (sets `RUBYLIB` and `RUBYOPT=-rrperf`). `false` disables child tracking |
 
 ## Rperf.stop return value
 

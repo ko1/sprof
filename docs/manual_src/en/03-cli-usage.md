@@ -373,7 +373,7 @@ When child process tracking is enabled (the default), rperf:
 
 1. Sets up a session directory for collecting per-process profiles
 2. Installs a `Process._fork` hook that restarts profiling in forked children
-3. Spawned Ruby children (via `spawn`, `system`, backticks) inherit `RUBYOPT=-rrperf` and auto-start profiling
+3. Spawned Ruby children (via `spawn`, `system`, backticks) inherit `RUBYLIB` (pointing to rperf's lib directory) and `RUBYOPT=-rrperf`, and auto-start profiling
 4. Each child writes its profile to the session directory on exit
 5. The root process aggregates all profiles and produces the final output
 

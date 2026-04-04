@@ -102,7 +102,7 @@ When [multi-process profiling](#index:multi-process profiling) is enabled (the d
 3. **On child exit**: The inherited `at_exit` hook calls `Rperf.stop`, writing the child's profile to the session directory as a `.json.gz` file.
 4. **On root exit**: The root writes its own profile, then aggregates all `.json.gz` files in the session directory into a single merged output (stat report or file). The session directory is then deleted.
 
-For spawned children (`spawn`, `system`), the child inherits `RUBYOPT=-rrperf` and environment variables (`RPERF_SESSION_DIR`, `RPERF_ROOT_PROCESS`). When the child Ruby process loads rperf, the auto-start block detects it is not the root process and writes its profile directly to the session directory.
+For spawned children (`spawn`, `system`), the child inherits `RUBYLIB` (pointing to rperf's lib directory) and `RUBYOPT=-rrperf`, plus environment variables (`RPERF_SESSION_DIR`, `RPERF_ROOT_PROCESS`). When the child Ruby process loads rperf, the auto-start block detects it is not the root process and writes its profile directly to the session directory.
 
 ### Session directory
 

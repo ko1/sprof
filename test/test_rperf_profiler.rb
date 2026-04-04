@@ -400,6 +400,27 @@ class TestRperfProfiler < Test::Unit::TestCase
       "RUBYOPT should not accumulate -rrperf across start/stop cycles"
   end
 
+  # Regression test: inherit: true must set RUBYLIB (not RUBYOPT -r<fullpath>)
+  # so that paths with spaces work. RUBYOPT -r does not support spaces.
+  def test_inherit_true_sets_rubylib_for_space_safe_path
+    Rperf.start(frequency: 100, inherit: true)
+
+    # RUBYOPT should use -rrperf (bare name), not -r<full path>
+    rubyopt = ENV["RUBYOPT"].to_s
+    assert_include rubyopt, "-rrperf",
+      "RUBYOPT should contain -rrperf"
+    refute_match(/-r\//, rubyopt,
+      "RUBYOPT should not contain -r<full path> (breaks on spaces)")
+
+    # RUBYLIB should contain rperf's lib directory
+    rubylib = ENV["RUBYLIB"].to_s
+    assert_include rubylib, File.expand_path("../lib", __dir__),
+      "RUBYLIB should contain rperf's lib dir"
+
+    sleep 0.02
+    Rperf.stop
+  end
+
   # --- ActiveJob middleware require ---
 
   def test_active_job_middleware_loadable

@@ -369,7 +369,7 @@ rperf record -m wall -o profile.json.gz bundle exec puma
 
 1. プロセスごとのプロファイルを収集するためのセッションディレクトリを設定
 2. fork された子プロセスでプロファイリングを再開する `Process._fork` フックをインストール
-3. spawn された Ruby 子プロセス（`spawn`、`system`、バッククォート経由）は `RUBYOPT=-rrperf` を継承して自動的にプロファイリングを開始
+3. spawn された Ruby 子プロセス（`spawn`、`system`、バッククォート経由）は `RUBYLIB`（rperf の lib ディレクトリを指す）と `RUBYOPT=-rrperf` を継承して自動的にプロファイリングを開始
 4. 各子プロセスが終了時にプロファイルをセッションディレクトリに書き込み
 5. ルートプロセスが全プロファイルを集約して最終出力を生成
 
